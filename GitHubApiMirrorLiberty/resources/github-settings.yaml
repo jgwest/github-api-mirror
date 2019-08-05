@@ -1,0 +1,22 @@
+---
+githubServer: # FILL THIS IN - GitHub server, eg github.com
+githubUsername: # FILL THIS IN - GitHub server username
+githubPassword: # FILL THIS IN - GitHub server password (or personal access token)
+
+# These three lists are marked as Optional, but at least one must be specified.
+
+#(Optional) Specify a list of GitHub organizations to mirror, eg:
+#orgList:
+#- eclipse
+
+#(Optional) Specify a list of GitHub uers to mirror, eg:
+#userRepoList:
+#- jgwest
+
+#(Optional) Rather than specifying an org, or user, as above, one may just specify individual repos, eg:
+#individualRepoList:
+#- jgwest/github-api-mirror
+
+presharedKey: # FILL THIS IN - This is an arbitrary personal access token that is shared between the GHAM server and GHAM client.
+dbPath: # FILL THIS IN - Path to a directory to store the database. If this is a relative path, it will be relative to the Open Liberty server/ directory.
+githubRateLimit: # (Optional) - If running against GitHub Enterprise, specifiy a # of requests per hour, eg 5000.
