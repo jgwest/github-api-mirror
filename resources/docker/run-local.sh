@@ -28,6 +28,6 @@ docker run  -d  -p 9443:9443 --name github-api-mirror-container \
     --cap-drop=all \
     --tmpfs /opt/ol/wlp/output --tmpfs /logs \
     --read-only \
-    jgwest/github-api-mirror
+    github-api-mirror
 
 
