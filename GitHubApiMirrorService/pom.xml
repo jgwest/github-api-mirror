@@ -4,20 +4,20 @@
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>github-api-mirror</groupId>
 	<artifactId>GitHubApiMirrorService</artifactId>
-	<version>0.0.1-SNAPSHOT</version>
+	<version>1.0.0</version>
 	<packaging>war</packaging>
 
 	<dependencies>
 		<dependency>
 			<groupId>github-api-mirror</groupId>
 			<artifactId>GitHubApiMirrorShared</artifactId>
-			<version>0.0.1-SNAPSHOT</version>
+			<version>1.0.0</version>
 		</dependency>
 
 		<dependency>
 			<groupId>github-api-mirror</groupId>
 			<artifactId>GitHubApiMirror</artifactId>
-			<version>0.0.1-SNAPSHOT</version>
+			<version>1.0.0</version>
 		</dependency>
 
 		<dependency>
