@@ -36,6 +36,7 @@ import com.githubapimirror.shared.json.BulkIssuesJson;
 import com.githubapimirror.shared.json.IssueJson;
 import com.githubapimirror.shared.json.OrganizationJson;
 import com.githubapimirror.shared.json.RepositoryJson;
+import com.githubapimirror.shared.json.ResourceChangeEventJson;
 import com.githubapimirror.shared.json.UserJson;
 import com.githubapimirror.shared.json.UserRepositoriesJson;
 
@@ -170,6 +171,16 @@ public class ApiMirrorService {
 		} else {
 			return Response.status(Status.NOT_FOUND).build();
 		}
+	}
+
+	@GET
+	@Path("/resourceChangeEvent")
+	public Response getUser(@QueryParam("since") long sinceGreaterOrEqualTime) {
+		verifyHeaderAuth();
+
+		Database db = getDb();
+		List<ResourceChangeEventJson> changes = db.getRecentResourceChangeEvents(sinceGreaterOrEqualTime);
+		return Response.ok(JsonUtil.toString(changes)).type(MediaType.APPLICATION_JSON_TYPE).build();
 	}
 
 	private void verifyHeaderAuth() {

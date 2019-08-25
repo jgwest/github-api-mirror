@@ -16,7 +16,10 @@
 
 package com.githubapimirror.client.api;
 
+import java.util.List;
+
 import com.githubapimirror.shared.json.OrganizationJson;
+import com.githubapimirror.shared.json.ResourceChangeEventJson;
 import com.githubapimirror.shared.json.UserRepositoriesJson;
 
 /**
@@ -59,6 +62,10 @@ public class GitHub {
 
 		return result;
 
+	}
+
+	public List<ResourceChangeEventJson> getResourceChangeEvents(long timeGreaterOrEqualInMsecs) {
+		return connectionInfo.getClient().getResourceChangeEvents(timeGreaterOrEqualInMsecs);
 	}
 
 	public GHConnectInfo getConnectionInfo() {

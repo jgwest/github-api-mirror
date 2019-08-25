@@ -23,6 +23,7 @@ import com.githubapimirror.shared.Owner;
 import com.githubapimirror.shared.json.IssueJson;
 import com.githubapimirror.shared.json.OrganizationJson;
 import com.githubapimirror.shared.json.RepositoryJson;
+import com.githubapimirror.shared.json.ResourceChangeEventJson;
 import com.githubapimirror.shared.json.UserJson;
 import com.githubapimirror.shared.json.UserRepositoriesJson;
 
@@ -57,6 +58,8 @@ public interface Database {
 
 	public List<String> getProcessedEvents();
 
+	public void clearProcessedEvents();
+
 	public Optional<UserRepositoriesJson> getUserRepositories(String user);
 
 	public void persistUserRepositories(UserRepositoriesJson r);
@@ -67,8 +70,8 @@ public interface Database {
 
 	/**
 	 * This is called at startup, to ensure the database contents match the repos we
-	 * are asked to mirror in the configuration file. If they don't match, the database
-	 * should be destroyed and rebuilt.
+	 * are asked to mirror in the configuration file. If they don't match, the
+	 * database should be destroyed and rebuilt.
 	 */
 	public void uninitializeDatabaseOnContentsMismatch(List<String> orgs, List<String> userRepos,
 			List<String> individualRepos);
@@ -80,4 +83,9 @@ public interface Database {
 	public void persistString(String key, String value);
 
 	public Optional<String> getString(String key);
+
+	public void persistResourceChangeEvents(List<ResourceChangeEventJson> newEvents);
+
+	public List<ResourceChangeEventJson> getRecentResourceChangeEvents(long timestampEqualOrGreater);
+
 }

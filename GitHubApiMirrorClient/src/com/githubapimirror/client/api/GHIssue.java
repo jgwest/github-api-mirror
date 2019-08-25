@@ -99,4 +99,8 @@ public class GHIssue {
 		return connInfo.getUserByLogin(json.getReporter());
 	}
 
+	public boolean isClosed() {
+		return json.isClosed();
+	}
+
 }
