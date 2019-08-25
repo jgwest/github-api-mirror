@@ -42,6 +42,8 @@ public class IssueJson {
 
 	private boolean isPullRequest;
 
+	private boolean isClosed;
+
 	private List<IssueCommentJson> comments = new ArrayList<>();
 
 	private String reporter;
@@ -154,4 +156,13 @@ public class IssueJson {
 	public void setIssueEvents(List<IssueEventJson> issueEvents) {
 		this.issueEvents = issueEvents;
 	}
+
+	public boolean isClosed() {
+		return isClosed;
+	}
+
+	public void setClosed(boolean isClosed) {
+		this.isClosed = isClosed;
+	}
+
 }

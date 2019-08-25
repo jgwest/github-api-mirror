@@ -62,6 +62,10 @@ public class GHRepository {
 		return owner.getName() + "/" + name;
 	}
 
+	public String getOwnerName() {
+		return owner.getName();
+	}
+
 	/** Retrieve a single issue, or null if not found. */
 	public GHIssue getIssue(int id) {
 		GHApiMirrorHttpClient client = connInfo.getClient();

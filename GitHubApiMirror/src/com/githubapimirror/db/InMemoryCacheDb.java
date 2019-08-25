@@ -26,6 +26,7 @@ import com.githubapimirror.shared.Owner;
 import com.githubapimirror.shared.json.IssueJson;
 import com.githubapimirror.shared.json.OrganizationJson;
 import com.githubapimirror.shared.json.RepositoryJson;
+import com.githubapimirror.shared.json.ResourceChangeEventJson;
 import com.githubapimirror.shared.json.UserJson;
 import com.githubapimirror.shared.json.UserRepositoriesJson;
 
@@ -236,6 +237,11 @@ public class InMemoryCacheDb implements Database {
 	}
 
 	@Override
+	public void clearProcessedEvents() {
+		inner.clearProcessedEvents();
+	}
+
+	@Override
 	public boolean isDatabaseInitialized() {
 		return inner.isDatabaseInitialized();
 	}
@@ -296,6 +302,16 @@ public class InMemoryCacheDb implements Database {
 		putByKeyOptional(key, result);
 
 		return result;
+	}
+
+	@Override
+	public void persistResourceChangeEvents(List<ResourceChangeEventJson> newEvents) {
+		inner.persistResourceChangeEvents(newEvents);
+	}
+
+	@Override
+	public List<ResourceChangeEventJson> getRecentResourceChangeEvents(long timestampEqualOrGreater) {
+		return inner.getRecentResourceChangeEvents(timestampEqualOrGreater);
 	}
 
 }

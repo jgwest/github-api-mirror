@@ -16,6 +16,10 @@
 
 package com.githubapimirror.client;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 import java.util.Optional;
 
 import com.githubapimirror.shared.Owner;
@@ -24,6 +28,7 @@ import com.githubapimirror.shared.json.BulkIssuesJson;
 import com.githubapimirror.shared.json.IssueJson;
 import com.githubapimirror.shared.json.OrganizationJson;
 import com.githubapimirror.shared.json.RepositoryJson;
+import com.githubapimirror.shared.json.ResourceChangeEventJson;
 import com.githubapimirror.shared.json.UserJson;
 import com.githubapimirror.shared.json.UserRepositoriesJson;
 
@@ -49,7 +54,7 @@ public class GHApiMirrorHttpClient {
 					UserRepositoriesJson.class);
 			return Optional.of(response.getResponse());
 		} catch (GHApiMirrorClientException e) {
-			e.printStackTrace();
+//			e.printStackTrace();
 			return Optional.empty();
 		}
 	}
@@ -60,7 +65,7 @@ public class GHApiMirrorHttpClient {
 			ApiResponse<OrganizationJson> response = client.get("/organization/" + name, OrganizationJson.class);
 			return Optional.of(response.getResponse());
 		} catch (GHApiMirrorClientException e) {
-			e.printStackTrace();
+//			e.printStackTrace();
 			return Optional.empty();
 		}
 	}
@@ -75,7 +80,7 @@ public class GHApiMirrorHttpClient {
 					.get("/repository/" + ownerType + "/" + ownerName + "/" + repoName, RepositoryJson.class);
 			return Optional.of(response.getResponse());
 		} catch (GHApiMirrorClientException e) {
-			e.printStackTrace();
+//			e.printStackTrace();
 			return Optional.empty();
 		}
 
@@ -91,7 +96,7 @@ public class GHApiMirrorHttpClient {
 					.get("/issue/" + ownerType + "/" + ownerName + "/" + repoName + "/" + issueNumber, IssueJson.class);
 			return Optional.of(response.getResponse());
 		} catch (GHApiMirrorClientException e) {
-			e.printStackTrace();
+//			e.printStackTrace();
 			return Optional.empty();
 		}
 	}
@@ -102,7 +107,7 @@ public class GHApiMirrorHttpClient {
 			ApiResponse<UserJson> response = client.get("/user/" + loginName, UserJson.class);
 			return Optional.of(response.getResponse());
 		} catch (GHApiMirrorClientException e) {
-			e.printStackTrace();
+//			e.printStackTrace();
 			return Optional.empty();
 		}
 
@@ -119,10 +124,28 @@ public class GHApiMirrorHttpClient {
 					BulkIssuesJson.class);
 			return Optional.of(response.getResponse());
 		} catch (GHApiMirrorClientException e) {
-			e.printStackTrace();
+//			e.printStackTrace();
 			return Optional.empty();
 		}
 
 	}
 
+	public List<ResourceChangeEventJson> getResourceChangeEvents(long timestampEqualOrGreater) {
+
+		try {
+			ApiResponse<ResourceChangeEventJson[]> response = client
+					.get("/resourceChangeEvent?since=" + timestampEqualOrGreater, ResourceChangeEventJson[].class);
+
+			List<ResourceChangeEventJson> result = new ArrayList<>();
+
+			result.addAll(Arrays.asList(response.getResponse()));
+
+			return result;
+
+		} catch (GHApiMirrorClientException e) {
+//			e.printStackTrace();
+			return Collections.emptyList();
+		}
+
+	}
 }

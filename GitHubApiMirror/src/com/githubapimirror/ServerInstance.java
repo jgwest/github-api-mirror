@@ -18,6 +18,7 @@ package com.githubapimirror;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Calendar;
@@ -40,6 +41,7 @@ import org.kohsuke.github.GitHubBuilder;
 import org.kohsuke.github.RateLimitHandler;
 
 import com.githubapimirror.EventScan.EventScanData;
+import com.githubapimirror.EventScan.ProcessIteratorReturnValue;
 import com.githubapimirror.WorkQueue.OwnerContainer;
 import com.githubapimirror.WorkQueue.RepositoryContainer;
 import com.githubapimirror.db.Database;
@@ -57,8 +59,6 @@ import com.githubapimirror.shared.Owner;
  * To construct an instance of this class, call ZHServerInstance.builder().
  */
 public class ServerInstance {
-
-	private final EventScanData data;
 
 	private final WorkQueue queue;
 
@@ -106,8 +106,6 @@ public class ServerInstance {
 		db.uninitializeDatabaseOnContentsMismatch(orgNames, userRepos, individualRepos);
 
 		queue = new WorkQueue(this, db, numRequestsPerHour);
-
-		data = new EventScanData(db.getProcessedEvents());
 
 		GitHub githubClient;
 		boolean weSupportRateLimit = false;
@@ -248,7 +246,7 @@ public class ServerInstance {
 			} while (!success);
 
 		} catch (IOException e) {
-			throw new RuntimeException(e);
+			throw new UncheckedIOException(e);
 		}
 
 		this.supportsRateLimit = weSupportRateLimit;
@@ -321,9 +319,13 @@ public class ServerInstance {
 
 		private boolean fullScanInProgress = false;
 
+		private final EventScanData data;
+
 		public BackgroundSchedulerThread() {
 			setName(BackgroundSchedulerThread.class.getName());
 			setDaemon(true);
+
+			data = new EventScanData(db.getProcessedEvents());
 		}
 
 		/**
@@ -338,20 +340,53 @@ public class ServerInstance {
 			int dayOfYear = c.get(Calendar.DAY_OF_YEAR);
 			int year = c.get(Calendar.YEAR);
 
-			boolean runFullScan = (hour == 3 || !getDb().isDatabaseInitialized());
-
-			// Run a full scan if the database has not been refreshed in X hours
 			Long lastFullScan = db.getLong(Database.LAST_FULL_SCAN).orElse(null);
-			if (lastFullScan != null && !fullScanInProgress) {
-				long elapsedTimeInHours = TimeUnit.HOURS.convert(System.currentTimeMillis() - lastFullScan,
-						TimeUnit.MILLISECONDS);
-				if (elapsedTimeInHours > 48) {
-					System.out.println("* Database is " + elapsedTimeInHours + " hours old, so running full scan.");
-					runFullScan = true;
+
+			if (queue.availableWork() == 0 && this.fullScanInProgress) {
+				// A full scan is considered completed if it starts, and then the available work
+				// dropped to 0.
+
+				// TODO: Is there a race condition where availableWork drops to zero in the
+				// early stages of a new job starting?
+
+				this.fullScanInProgress = false;
+				lastFullScan = System.currentTimeMillis();
+				db.persistLong(Database.LAST_FULL_SCAN, lastFullScan);
+				db.clearProcessedEvents();
+
+				data.clear();
+
+				log.logInfo("Full scan was detected as complete.");
+
+			}
+
+			boolean fullScanRequired = (hour == 3 || !getDb().isDatabaseInitialized() || lastFullScan == null);
+
+			if (!fullScanRequired) {
+
+				if (queue.availableWork() <= 100) {
+
+					if (System.nanoTime() >= nextEventScanInNanos.get() && !this.fullScanInProgress
+							&& lastFullScan != null) {
+						nextEventScanInNanos.set(System.nanoTime() + timeBetweenEventScansInNanos);
+
+						for (OwnerContainer oc : ghOwners) {
+							ProcessIteratorReturnValue retVal = EventScan.doEventScan(oc, data, queue, lastFullScan);
+
+							if (retVal.isFullScanRequired() && !fullScanRequired) {
+								log.logInfo("Setting 'runFullScan' to true based on event scan");
+								fullScanRequired = true;
+							}
+
+							List<String> newEventHashes = retVal.getNewEventHashes();
+							db.addProcessedEvents(newEventHashes);
+						}
+					}
+
 				}
 			}
 
-			if (runFullScan) {
+			if (fullScanRequired && !fullScanInProgress) {
 
 				if (!getDb().isDatabaseInitialized()) {
 					getDb().initializeDatabase();
@@ -361,6 +396,8 @@ public class ServerInstance {
 				if (!hasDailyScanRunToday.containsKey(value)) {
 					hasDailyScanRunToday.put(value, true);
 
+					log.logInfo("Beginning full scan.");
+
 					this.fullScanInProgress = true;
 
 					ghOwners.forEach(e -> {
@@ -369,41 +406,20 @@ public class ServerInstance {
 
 				}
 
-			} else if (hour >= 2 && hour <= 4) {
-				/* ignore */
-
-			} else if (queue.availableWork() <= 100) {
-
-				if (queue.availableWork() == 0 && this.fullScanInProgress) {
-					// A full scan is considered completed if started, and then
-					// the available work dropped to 0.
-					this.fullScanInProgress = false;
-					db.persistLong(Database.LAST_FULL_SCAN, System.currentTimeMillis());
-				}
-
-				if (System.nanoTime() >= nextEventScanInNanos.get()) {
-					nextEventScanInNanos.set(System.nanoTime() + timeBetweenEventScansInNanos);
-
-					for (OwnerContainer oc : ghOwners) {
-						List<String> newEventHashes = EventScan.doEventScan(oc, data, queue);
-						db.addProcessedEvents(newEventHashes);
-
-					}
-				}
-
 			}
-
 		}
 
 		@Override
 		public void run() {
 
-			AtomicLong nextEventScanInNanos = new AtomicLong(System.nanoTime());
+			AtomicLong nextEventScanInNanos = new AtomicLong(0);
 
 			// Whether the daily scan has run today
-			Map<Long /* year * 1000 + day_of_year */, Boolean> hasDailyScanRunToday = new HashMap<>();
+			Map<Long /* (year * 1000) + day_of_year */, Boolean /* not used */> hasDailyScanRunToday = new HashMap<>();
 
 			while (true) {
+
+				log.logDebug("Background thread wake up.");
 
 				try {
 					innerRun(hasDailyScanRunToday, nextEventScanInNanos);

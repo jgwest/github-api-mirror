@@ -30,6 +30,7 @@ import java.util.Base64;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -43,6 +44,7 @@ import com.githubapimirror.shared.Owner;
 import com.githubapimirror.shared.json.IssueJson;
 import com.githubapimirror.shared.json.OrganizationJson;
 import com.githubapimirror.shared.json.RepositoryJson;
+import com.githubapimirror.shared.json.ResourceChangeEventJson;
 import com.githubapimirror.shared.json.UserJson;
 import com.githubapimirror.shared.json.UserRepositoriesJson;
 
@@ -334,16 +336,6 @@ public class PersistJsonDb implements Database {
 
 			contents.addAll(eventsToAdd);
 
-			if (contents.size() > 500) { // With an ArrayList: Faster to reverse, remove from end, then reverse again
-				Collections.reverse(contents);
-
-				while (contents.size() > 500) {
-					contents.remove(contents.size() - 1);
-				}
-
-				Collections.reverse(contents);
-			}
-
 			writeToFile(contents, eventHashesFile);
 
 		} finally {
@@ -374,6 +366,25 @@ public class PersistJsonDb implements Database {
 	}
 
 	@Override
+	public void clearProcessedEvents() {
+		try {
+			writeLock.lock();
+
+			File metadataDir = new File(outputDirectory, "metadata");
+			metadataDir.mkdirs();
+
+			File eventHashesFile = new File(metadataDir, "event-hashes.txt");
+
+			List<String> contents = new ArrayList<>();
+
+			writeToFile(contents, eventHashesFile);
+
+		} finally {
+			writeLock.unlock();
+		}
+	}
+
+	@Override
 	public boolean isDatabaseInitialized() {
 
 		return initialized.get();
@@ -389,14 +400,8 @@ public class PersistJsonDb implements Database {
 	public void uninitializeDatabaseOnContentsMismatch(List<String> orgs, List<String> userRepos,
 			List<String> individualRepos) {
 
-		if (!isDatabaseInitialized()) {
-			return;
-		}
-
 		if (DEBUG_IGNORE_OLD_DATABASE) {
-			for (int x = 0; x < 30; x++) {
-				System.err.println("Debug: Ignoring old database!!!!!!!!!!");
-			}
+			System.err.println("Debug: skipping check in uninitializeDatabaseOnContentsMismatch.");
 			return;
 		}
 
@@ -444,6 +449,13 @@ public class PersistJsonDb implements Database {
 
 		boolean uninitializeDatabase = false;
 
+		if (!isDatabaseInitialized()) {
+			// If the database has not yet been initialized, then just set the value and
+			// return.
+			persistString(KEY_GITHUB_CONTENTS_HASH, encoded);
+			return;
+		}
+
 		Optional<String> gitHubContentsHash = getString(KEY_GITHUB_CONTENTS_HASH);
 		if (!gitHubContentsHash.isPresent()) { // key not found
 			uninitializeDatabase = true;
@@ -452,6 +464,7 @@ public class PersistJsonDb implements Database {
 		}
 
 		if (uninitializeDatabase) {
+			// If we want to "un-initialize" the database, move it to 'old/'
 
 			File oldDir = new File(outputDirectory, "old");
 			if (!oldDir.exists()) {
@@ -476,7 +489,12 @@ public class PersistJsonDb implements Database {
 
 			log.logInfo("* Old database has been moved to " + oldDir.getPath());
 
+			persistString(KEY_GITHUB_CONTENTS_HASH, encoded);
+
 			initialized.set(false);
+		} else {
+			// The database on the filesystem matches the same GitHub repos/orgs/users as
+			// the current server instance, so no further action is required.
 		}
 
 	}
@@ -517,6 +535,122 @@ public class PersistJsonDb implements Database {
 		String contents = readFromFile(inputFile).orElse(null);
 
 		return Optional.ofNullable(contents);
+	}
+
+	@Override
+	public void persistResourceChangeEvents(List<ResourceChangeEventJson> newEvents) {
+
+		File directory = new File(outputDirectory, "events");
+
+		newEvents.stream().filter(e -> e.getTime() <= 0).findAny().ifPresent(e -> {
+			throw new RuntimeException("One or more JSON files was missing a time.");
+		});
+
+		try {
+			writeLock.lock();
+
+			ObjectMapper om = new ObjectMapper();
+
+			if (!directory.exists() && !directory.mkdirs()) {
+				throw new RuntimeException("Unable to create directory: " + directory);
+			}
+
+			long currTime = System.currentTimeMillis();
+
+			File file;
+			while (true) {
+
+				file = new File(directory, "issue-" + currTime + ".json");
+				if (file.exists()) {
+					currTime++;
+				} else {
+					break;
+				}
+
+			}
+
+			try {
+				writeToFile(om.writeValueAsString(newEvents), file);
+			} catch (JsonProcessingException e) {
+				throw new RuntimeException(e);
+			}
+
+		} finally {
+			writeLock.unlock();
+		}
+
+	}
+
+	@Override
+	public List<ResourceChangeEventJson> getRecentResourceChangeEvents(long timestampEqualOrGreater) {
+		File directory = new File(outputDirectory, "events");
+
+		// Keep events in database for only 8 days
+		long expireTimestamp = System.currentTimeMillis() - TimeUnit.MILLISECONDS.convert(8, TimeUnit.DAYS);
+
+		List<File> filesToDelete = new ArrayList<>();
+
+		List<ResourceChangeEventJson> result = new ArrayList<>();
+		try {
+			readLock.lock();
+
+			ObjectMapper om = new ObjectMapper();
+
+			if (!directory.exists()) {
+				return Collections.emptyList();
+			}
+
+			List<File> files = Arrays.asList(directory.listFiles()).stream()
+					.filter(e -> e.getName().startsWith("issue-") && e.getName().endsWith(".json"))
+					.collect(Collectors.toList());
+
+			for (File f : files) {
+				String name = f.getName();
+				int index = name.indexOf("-");
+				int endIndex = name.indexOf(".json");
+
+				long timestamp = Long.parseLong(name.substring(index + 1, endIndex));
+
+				if (timestamp >= timestampEqualOrGreater) {
+					try {
+						result.addAll(
+								Arrays.asList(om.readValue(readFromFile(f).get(), ResourceChangeEventJson[].class)));
+					} catch (IOException ex) {
+						throw new RuntimeException(ex);
+					}
+				}
+
+				if (timestamp < expireTimestamp) {
+					filesToDelete.add(f);
+				}
+
+			}
+
+		} finally {
+			readLock.unlock();
+		}
+
+		// Delete expired files.
+		try {
+			writeLock.lock();
+
+			filesToDelete.forEach(e -> {
+				if (e.exists() && !e.delete()) {
+					System.err.println("* Unable to delete: " + e.getPath());
+				}
+			});
+
+		} finally {
+			writeLock.unlock();
+		}
+
+		// Sort ascending by timestamp;
+		Collections.sort(result, (a, b) -> {
+			return (int) (a.getTime() - b.getTime());
+		});
+
+		return result;
+
 	}
 
 }

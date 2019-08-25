@@ -18,8 +18,11 @@ package com.githubapimirror;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
+import java.util.NoSuchElementException;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -35,11 +38,13 @@ import org.kohsuke.github.GHOrganization;
 import org.kohsuke.github.GHRepository;
 import org.kohsuke.github.GHUser;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.githubapimirror.WorkQueue.IssueContainer;
 import com.githubapimirror.WorkQueue.OwnerContainer;
 import com.githubapimirror.WorkQueue.RepositoryContainer;
 import com.githubapimirror.db.Database;
 import com.githubapimirror.shared.GHApiUtil;
+import com.githubapimirror.shared.JsonUtil;
 import com.githubapimirror.shared.Owner;
 import com.githubapimirror.shared.Owner.Type;
 import com.githubapimirror.shared.json.IssueCommentJson;
@@ -50,6 +55,7 @@ import com.githubapimirror.shared.json.IssueEventRenamedJson;
 import com.githubapimirror.shared.json.IssueJson;
 import com.githubapimirror.shared.json.OrganizationJson;
 import com.githubapimirror.shared.json.RepositoryJson;
+import com.githubapimirror.shared.json.ResourceChangeEventJson;
 import com.githubapimirror.shared.json.UserJson;
 import com.githubapimirror.shared.json.UserRepositoriesJson;
 
@@ -156,6 +162,9 @@ public class WorkerThread extends Thread {
 
 	private static void printException(Exception e) {
 		String exStr = e.getClass().getName() + ": " + e.getMessage();
+		if (e instanceof NoSuchElementException) {
+			e.printStackTrace();
+		}
 		System.err.println(exStr);
 	}
 
@@ -266,6 +275,8 @@ public class WorkerThread extends Thread {
 			queue.addUser(reporter);
 		}
 
+		json.setClosed(issue.getState() == GHIssueState.CLOSED);
+
 		json.setReporter(reporterLogin);
 
 		json.setPullRequest(issue.isPullRequest());
@@ -310,7 +321,7 @@ public class WorkerThread extends Thread {
 			json.getComments().add(commentJson);
 		}
 
-		// Acquire issue events
+		// Acquire issue events, add them to the JSON
 		if (filter == null || filter.processIssueEvents(issueContainer.getOwner(), repoName, issue.getNumber())) {
 
 			GitHubClient client = queue.getServerInstance().getEgitClient();
@@ -372,6 +383,8 @@ public class WorkerThread extends Thread {
 
 		}
 
+		IssueJson oldDbVersion = db.getIssue(issueContainer.getOwner(), repoName, issueNumber).orElse(null);
+
 		db.persistIssue(issueContainer.getOwner(), json);
 
 		db.getRepository(issueContainer.getOwner(), repoName).ifPresent(e -> {
@@ -391,6 +404,17 @@ public class WorkerThread extends Thread {
 			}
 		});
 
+		// Compare the old version of the database entry, and the current version; if
+		// different, create a change event and add it to the database.
+		if (!JsonUtil.isEqual(oldDbVersion, json, new ObjectMapper())) {
+			ResourceChangeEventJson rcej = new ResourceChangeEventJson();
+			rcej.setOwner(issueContainer.getOwner().getName());
+			rcej.setRepo(repoName);
+			rcej.setTime(System.currentTimeMillis());
+			rcej.setUuid(UUID.randomUUID().toString());
+			rcej.setIssueNumber(issueNumber);
+			db.persistResourceChangeEvents(Arrays.asList(rcej));
+		}
 	}
 
 	private void processRepo(RepositoryContainer repoContainer, Database db) {

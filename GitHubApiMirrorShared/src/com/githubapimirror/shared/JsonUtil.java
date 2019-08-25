@@ -16,8 +16,14 @@
 
 package com.githubapimirror.shared;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.stream.Collectors;
+
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.githubapimirror.shared.json.IssueJson;
 
 /** JSON utility functions */
 public class JsonUtil {
@@ -43,4 +49,34 @@ public class JsonUtil {
 		}
 
 	}
+
+	public static boolean isEqual(IssueJson one, IssueJson two, ObjectMapper om) throws JsonProcessingException {
+
+		List<String> issues = Arrays.asList(one, two).stream().map(e -> {
+			try {
+				if (e == null) {
+					return "";
+				} else {
+					return om.writeValueAsString(e);
+				}
+			} catch (JsonProcessingException e1) {
+				throw new RuntimeException(e1);
+			}
+		}).map(e -> {
+			List<String> chars = new ArrayList<>();
+			for (int x = 0; x < e.length(); x++) {
+				char ch = e.charAt(x);
+				if (Character.isLetterOrDigit(ch)) {
+					chars.add(Character.toString(ch));
+				}
+			}
+
+			return chars.stream().sorted().reduce((a, b) -> a + b).orElse("");
+
+		}).collect(Collectors.toList());
+
+		return issues.get(0).equals(issues.get(1));
+
+	}
+
 }
