@@ -18,6 +18,7 @@ package com.githubapimirror;
 
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.text.NumberFormat;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.concurrent.TimeUnit;
@@ -31,6 +32,7 @@ public class GHLog {
 
 	private static final GHLog instance = new GHLog();
 
+	private final NumberFormat NUMBER_FORMAT = NumberFormat.getInstance();
 	private final SimpleDateFormat PRETTY_DATE_FORMAT = new SimpleDateFormat("MMM d h:mm:ss.SSS a");
 
 	private final long startTimeInNanos = System.nanoTime();
@@ -138,7 +140,7 @@ public class GHLog {
 			msecsStr = "0" + msecsStr;
 		}
 
-		return PRETTY_DATE_FORMAT.format(new Date()) + " [" + seconds + "." + msecsStr + "]";
+		return PRETTY_DATE_FORMAT.format(new Date()) + " [" + NUMBER_FORMAT.format(seconds) + "." + msecsStr + "]";
 
 	}
 

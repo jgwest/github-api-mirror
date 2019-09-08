@@ -28,6 +28,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
@@ -321,6 +322,9 @@ public class PersistJsonDb implements Database {
 	@Override
 	public void addProcessedEvents(List<String> eventsToAdd) {
 		try {
+
+			HashSet<String> hs = new HashSet<>(eventsToAdd);
+
 			writeLock.lock();
 
 			File metadataDir = new File(outputDirectory, "metadata");
@@ -328,15 +332,14 @@ public class PersistJsonDb implements Database {
 
 			File eventHashesFile = new File(metadataDir, "event-hashes.txt");
 
-			List<String> contents = new ArrayList<>();
-
 			if (eventHashesFile.exists()) {
-				contents.addAll(GHApiUtil.readFileIntoLines(eventHashesFile));
+
+				GHApiUtil.readFileIntoLines(eventHashesFile).stream().filter(e -> !hs.contains(e)).forEach(e -> {
+					hs.add(e);
+				});
 			}
 
-			contents.addAll(eventsToAdd);
-
-			writeToFile(contents, eventHashesFile);
+			writeToFile(new ArrayList<>(hs), eventHashesFile);
 
 		} finally {
 			writeLock.unlock();

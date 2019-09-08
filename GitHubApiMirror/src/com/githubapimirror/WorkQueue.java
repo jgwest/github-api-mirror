@@ -19,6 +19,7 @@ package com.githubapimirror;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -51,6 +52,8 @@ public class WorkQueue {
 	private final List<IssueContainer> issuesToProcess_synch_lock = new ArrayList<>();
 	private final List<GHUser> usersToProcess_synch_lock = new ArrayList<>();
 
+	private final HashSet<Object /* one of the above classes */> activeResources_synch_lock = new HashSet<>();
+
 	/**
 	 * Users are mostly immutable, so we only acquire them once. We use this to
 	 * avoid reacquiring them.
@@ -61,18 +64,21 @@ public class WorkQueue {
 
 	private final ServerInstance serverInstance;
 
-	private long minimumElapsedTimeBetweenWorkInNanos_synch_lock;
+	private final int numRequestsPerHour;
 
 	private long nextWorkAvailableInNanos_synch_lock = Long.MIN_VALUE;
 
+	// TODO: Move this to YAML
+	private static final int MAX_REQUEST_PER_SECOND_IN_MSECS = (int) (1000 / 3); // 3 per second
+
 	private static final GHLog log = GHLog.getInstance();
 
-	public WorkQueue(ServerInstance serverInstance, Database db, int numRequestsPerHour) {
+	public WorkQueue(ServerInstance serverInstance, Database db, int numRequestsPerHourParam) {
 		this.db = db;
 		this.serverInstance = serverInstance;
 
-		this.minimumElapsedTimeBetweenWorkInNanos_synch_lock = TimeUnit.NANOSECONDS.convert(1, TimeUnit.HOURS)
-				/ numRequestsPerHour;
+		this.numRequestsPerHour = numRequestsPerHourParam;
+
 	}
 
 	public void addOwner(OwnerContainer oc) {
@@ -156,14 +162,39 @@ public class WorkQueue {
 
 	}
 
+	public int activeResources() {
+		synchronized (lock) {
+			return activeResources_synch_lock.hashCode();
+		}
+	}
+
 	private boolean checkNextWorkAvailableTime() {
 		synchronized (lock) {
 			return nextWorkAvailableInNanos_synch_lock < System.nanoTime();
 		}
 	}
 
-	private void updateNextWorkAvailableTime(int estimatedRequests) {
+	private static final boolean NEW_ALGORITHM = true;
+
+	public void waitIfNeeded(int estimateRequests) {
+		long waitUntilTimeInNanos = calculateAndUpdateNextWorkAvailableTime(estimateRequests);
+
+//		long waitTimeInSeconds = TimeUnit.SECONDS.convert(waitUntilTimeInNanos - System.nanoTime(),
+//				TimeUnit.NANOSECONDS);
+//
+//		if (waitTimeInSeconds > 10) {
+//			System.out.println("Waiting " + waitTimeInSeconds + " seconds. ");
+//		}
+
+		while (System.nanoTime() < waitUntilTimeInNanos) {
+			GHApiUtil.sleep(20);
+		}
+	}
+
+	private long calculateNextWorkAvailableTime(int estimatedRequests) {
 		Optional<Long[]> remainingRequestsPerSecond = serverInstance.getRemainingRequestsPerSecond();
+
+		long result;
 
 		synchronized (lock) {
 
@@ -176,30 +207,68 @@ public class WorkQueue {
 				long requestsRemaining = remainingRequestsPerSecond.get()[0];
 				long secondsRemaining = remainingRequestsPerSecond.get()[1];
 
+				long totalLimit = remainingRequestsPerSecond.get()[2];
+
 				if (secondsRemaining < 0) {
 					secondsRemaining = 0;
 				}
-				
-				if(requestsRemaining <= 0) {
+
+				if (requestsRemaining <= 0) {
 					requestsRemaining = 1;
 				}
 
 				log.logDebug("Remaining: " + requestsRemaining + " " + secondsRemaining + " -> "
 						+ ((secondsRemaining * 1000) / requestsRemaining));
 
-				this.minimumElapsedTimeBetweenWorkInNanos_synch_lock = TimeUnit.NANOSECONDS.convert(secondsRemaining,
-						TimeUnit.SECONDS) / requestsRemaining;
+				if (NEW_ALGORITHM) {
+					// Target number of request/second, for the repo
+					double targetRps = (double) (totalLimit) / 3600d;
 
-				nextWorkAvailableInNanos_synch_lock = System.nanoTime()
-						+ minimumElapsedTimeBetweenWorkInNanos_synch_lock;
+					long timeToWaitInSeconds = secondsRemaining - (long) ((double) requestsRemaining / targetRps);
+					if (timeToWaitInSeconds < 0) {
+						timeToWaitInSeconds = 0;
+					} else if (timeToWaitInSeconds > 10) {
+						timeToWaitInSeconds = 10;
+					}
+					System.out.println("tws: " + timeToWaitInSeconds); // TODO: Remove this.
+
+					long timeToWaitInNanos = TimeUnit.NANOSECONDS.convert(timeToWaitInSeconds, TimeUnit.SECONDS);
+
+					if (timeToWaitInSeconds == 0) {
+
+						// Set a maximum number of requests per second
+						timeToWaitInNanos = TimeUnit.NANOSECONDS
+								.convert(estimatedRequests * MAX_REQUEST_PER_SECOND_IN_MSECS, TimeUnit.MILLISECONDS);
+					}
+
+					result = System.nanoTime() + timeToWaitInNanos;
+
+				} else {
+					// Old algorithm
+					long minimumElapsedTimeBetweenWorkInNanos = TimeUnit.NANOSECONDS.convert(secondsRemaining,
+							TimeUnit.SECONDS) / requestsRemaining;
+
+					result = System.nanoTime() + minimumElapsedTimeBetweenWorkInNanos;
+				}
 
 			} else {
+				long minimumElapsedTimeBetweenWorkInNanos = TimeUnit.NANOSECONDS.convert(1, TimeUnit.HOURS)
+						/ numRequestsPerHour;
+
 				// We use 'estimatedRequests', which is a guess at the number of requests used
 				// by the last server API call.
-				nextWorkAvailableInNanos_synch_lock = System.nanoTime()
-						+ estimatedRequests * minimumElapsedTimeBetweenWorkInNanos_synch_lock;
+				result = System.nanoTime() + estimatedRequests * minimumElapsedTimeBetweenWorkInNanos;
 			}
 
+		}
+
+		return result;
+	}
+
+	private long calculateAndUpdateNextWorkAvailableTime(int estimatedRequests) {
+		synchronized (lock) {
+			nextWorkAvailableInNanos_synch_lock = calculateNextWorkAvailableTime(estimatedRequests);
+			return nextWorkAvailableInNanos_synch_lock;
 		}
 	}
 
@@ -239,9 +308,11 @@ public class WorkQueue {
 				return Optional.empty();
 			}
 
-			updateNextWorkAvailableTime(5);
+			calculateAndUpdateNextWorkAvailableTime(5);
 
-			return Optional.of(ownersToProcess_synch_lock.remove(0));
+			OwnerContainer result = ownersToProcess_synch_lock.remove(0);
+			activeResources_synch_lock.add(result);
+			return Optional.of(result);
 		}
 	}
 
@@ -255,9 +326,11 @@ public class WorkQueue {
 				return Optional.empty();
 			}
 
-			updateNextWorkAvailableTime(20);
+			calculateAndUpdateNextWorkAvailableTime(20);
 
-			return Optional.of(repositoriesToProcess_synch_lock.remove(0));
+			RepositoryContainer result = repositoriesToProcess_synch_lock.remove(0);
+			activeResources_synch_lock.add(result);
+			return Optional.of(result);
 		}
 
 	}
@@ -272,9 +345,11 @@ public class WorkQueue {
 				return Optional.empty();
 			}
 
-			updateNextWorkAvailableTime(3);
+			calculateAndUpdateNextWorkAvailableTime(3);
 
-			return Optional.of(issuesToProcess_synch_lock.remove(0));
+			IssueContainer result = issuesToProcess_synch_lock.remove(0);
+			activeResources_synch_lock.add(result);
+			return Optional.of(result);
 		}
 	}
 
@@ -288,9 +363,27 @@ public class WorkQueue {
 				return Optional.empty();
 			}
 
-			updateNextWorkAvailableTime(1);
+			calculateAndUpdateNextWorkAvailableTime(1);
 
-			return Optional.of(usersToProcess_synch_lock.remove(0));
+			GHUser result = usersToProcess_synch_lock.remove(0);
+			activeResources_synch_lock.add(result);
+			return Optional.of(result);
+		}
+	}
+
+	public void markAsProcessed(Object o) {
+		if (!(o instanceof GHUser || o instanceof IssueContainer || o instanceof RepositoryContainer
+				|| o instanceof OwnerContainer)) {
+			throw new RuntimeException("Invalid parameter");
+		}
+
+		synchronized (lock) {
+			boolean match = activeResources_synch_lock.remove(o);
+
+			if (!match) {
+				throw new RuntimeException("Could not find matching object in active resources: " + o);
+			}
+
 		}
 	}
 
@@ -424,7 +517,11 @@ public class WorkQueue {
 			OwnerContainer other = (OwnerContainer) obj;
 
 			return other.equalsKey.equals(this.equalsKey);
+		}
 
+		@Override
+		public String toString() {
+			return calculateKey();
 		}
 
 	}
@@ -472,9 +569,15 @@ public class WorkQueue {
 			}
 			RepositoryContainer other = (RepositoryContainer) obj;
 
-			return other.calculateKey().contentEquals(calculateKey());
+			return other.calculateKey().equals(calculateKey());
 
 		}
+
+		@Override
+		public String toString() {
+			return calculateKey();
+		}
+
 	}
 
 	/**
@@ -547,6 +650,11 @@ public class WorkQueue {
 
 			return other.calculateKey().equals(this.calculateKey());
 
+		}
+
+		@Override
+		public String toString() {
+			return calculateKey();
 		}
 
 	}

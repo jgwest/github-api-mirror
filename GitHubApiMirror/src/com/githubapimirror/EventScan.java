@@ -73,13 +73,13 @@ public class EventScan {
 			GHOrganization org = ownerContainer.getOrg();
 			ownerName = org.getLogin();
 			it = org.listEvents().iterator();
-			return processIterator(it, Owner.org(ownerName), data, workQueue, lastFullScan);
+			return processIterator(it, Owner.org(ownerName), "*", data, workQueue, lastFullScan);
 
 		} else if (ownerContainer.getType() == OwnerContainer.Type.USER) {
 			GHUser user = ownerContainer.getUser();
 			ownerName = user.getLogin();
 			it = user.listEvents().iterator();
-			return processIterator(it, Owner.user(ownerName), data, workQueue, lastFullScan);
+			return processIterator(it, Owner.user(ownerName), "*", data, workQueue, lastFullScan);
 			// TODO: Not actually sure this will work for other users.
 
 		} else if (ownerContainer.getType() == OwnerContainer.Type.REPO_LIST) {
@@ -90,7 +90,7 @@ public class EventScan {
 
 			for (GHRepository repo : ownerContainer.getIndividualRepos()) {
 				ProcessIteratorReturnValue pirv = processIterator(repo.listEvents().iterator(),
-						ownerContainer.getOwner(), data, workQueue, lastFullScan);
+						ownerContainer.getOwner(), repo.getName(), data, workQueue, lastFullScan);
 
 				List<String> currRepoHash = pirv.getNewEventHashes();
 				eventHashResult.addAll(currRepoHash);
@@ -114,7 +114,7 @@ public class EventScan {
 	 */
 	@SuppressWarnings("unused")
 	private static ProcessIteratorReturnValue processIterator(PagedIterator<GHEventInfo> it, final Owner owner,
-			EventScanData data, WorkQueue workQueue, long lastFullScan) throws IOException {
+			String iteratorTarget, EventScanData data, WorkQueue workQueue, long lastFullScan) throws IOException {
 
 		List<EventScanEntry> toScan = new ArrayList<>();
 
@@ -127,7 +127,13 @@ public class EventScan {
 
 		boolean fullScanRequired = true;
 
+		int count = 0;
 		event_loop: for (; it.hasNext();) {
+
+			count++;
+			if (count % 20 == 0) {
+				workQueue.waitIfNeeded(1); // I'm guessing 1 request per 20 events?
+			}
 
 			GHEventInfo g = it.next();
 
@@ -217,16 +223,19 @@ public class EventScan {
 
 					String hash = createEventHash(eventType, owner, repoName, issue.getNumber(), createdAt, actorLogin);
 
-					if (data.isEventProcessed(hash)) {
+					boolean eventProcessed = data.isEventProcessed(hash);
+
+					if (eventProcessed) {
 						eventMatchesInARowFromEsd++;
 					} else {
 						eventMatchesInARowFromEsd = 0;
+						toScan.add(new EventScanEntry(issue, ghRepo, hash, g));
 					}
 
 					log.logDebug("Received event: [" + eventType.name() + "] " + g.getActorLogin() + " " + repoName
-							+ "/" + issue.getNumber() + " " + g.getType().name() + " " + g.getCreatedAt() + " " + hash);
+							+ "/" + issue.getNumber() + " " + g.getType().name() + " " + g.getCreatedAt() + " " + hash
+							+ (eventProcessed ? "*" : ""));
 
-					toScan.add(new EventScanEntry(issue, ghRepo, hash, g));
 				}
 
 			} else if (eventType == GHEvent.ISSUES) {
@@ -238,16 +247,18 @@ public class EventScan {
 				if (!issue.isPullRequest()) {
 					String hash = createEventHash(eventType, owner, repoName, issue.getNumber(), createdAt, actorLogin);
 
-					if (data.isEventProcessed(hash)) {
+					boolean eventProcessed = data.isEventProcessed(hash);
+
+					if (eventProcessed) {
 						eventMatchesInARowFromEsd++;
 					} else {
 						eventMatchesInARowFromEsd = 0;
+						toScan.add(new EventScanEntry(issue, ghRepo, hash, g));
 					}
 
 					log.logDebug("Received event: [" + eventType.name() + "] " + g.getActorLogin() + " " + repoName
-							+ "/" + issue.getNumber() + " " + g.getType().name() + " " + g.getCreatedAt() + " " + hash);
-
-					toScan.add(new EventScanEntry(issue, ghRepo, hash, g));
+							+ "/" + issue.getNumber() + " " + g.getType().name() + " " + g.getCreatedAt() + " " + hash
+							+ (eventProcessed ? "*" : ""));
 
 				}
 
@@ -280,6 +291,8 @@ public class EventScan {
 
 		} // end event_loop
 
+		workQueue.waitIfNeeded((int) (count / 20));
+
 		List<String> newEventHashes = new ArrayList<>();
 
 		Map<String /* (repo name)-(issue #) */, Boolean /* unused */> seen = new HashMap<String, Boolean>();
@@ -302,6 +315,8 @@ public class EventScan {
 
 			// The rest of this block add the issue to the work queue, and attempts to
 			// detect a move.
+
+			workQueue.waitIfNeeded(1);
 
 			GHRepository repo = e.getRepository();
 			GHIssue issue = repo.getIssue(e.getIssue().getNumber());
@@ -350,6 +365,9 @@ public class EventScan {
 		} else {
 			// A full scan of all the repos is required, so there is no need to queue
 			// individual items here.
+
+			log.logInfo("Full scan required for " + owner.getName() + "/" + iteratorTarget);
+
 		}
 
 		newEventHashes.forEach(e -> {

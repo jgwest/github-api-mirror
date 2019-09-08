@@ -22,6 +22,7 @@ import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Calendar;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -66,7 +67,8 @@ public class ServerInstance {
 
 	private final Database db;
 
-	private final long timeBetweenEventScansInNanos = TimeUnit.NANOSECONDS.convert(4, TimeUnit.MINUTES);
+	// TODO: Move this to yaml
+	private final long timeBetweenEventScansInNanos = TimeUnit.NANOSECONDS.convert(1, TimeUnit.MINUTES);
 
 	private final BackgroundSchedulerThread backgroundSchedulerThread;
 
@@ -81,6 +83,12 @@ public class ServerInstance {
 	private final boolean supportsRateLimit;
 
 	private final GitHub githubClientInstance;
+
+	private long rateLimitResetTime_synch_rateLimitLock = 0;
+
+	private Integer lastRateLimitSeen_synch_rateLimitLock = null;
+
+	private final Object rateLimitLock = new Object();
 
 	private ServerInstance(String username, String password, String serverName, List<String> orgNames,
 			List<String> userRepos, List<String> individualRepos, File dbDir, GhmFilter filter,
@@ -284,8 +292,8 @@ public class ServerInstance {
 			return Optional.empty();
 		}
 
-		// On connection failure, keep trying until success.
 		GHRateLimit rateLimit;
+
 		while (true) {
 			try {
 				rateLimit = this.githubClientInstance.lastRateLimit();
@@ -303,9 +311,29 @@ public class ServerInstance {
 
 		}
 
-		long remainingTimeInSecs = (rateLimit.getResetDate().getTime() - System.currentTimeMillis()) / 1000;
+		long resetDate;
 
-		return Optional.of(new Long[] { (long) rateLimit.remaining, remainingTimeInSecs });
+		synchronized (rateLimitLock) {
+
+			// If reset time has elapsed, or if we detect the limit increase (implying a
+			// reset).
+			if (System.currentTimeMillis() > rateLimitResetTime_synch_rateLimitLock
+					|| (lastRateLimitSeen_synch_rateLimitLock != null
+							&& lastRateLimitSeen_synch_rateLimitLock < rateLimit.remaining)) {
+				this.rateLimitResetTime_synch_rateLimitLock = rateLimit.getResetDate().getTime();
+
+				log.logInfo(
+						"Updating rate limit reset time, now:" + new Date(this.rateLimitResetTime_synch_rateLimitLock));
+			}
+
+			lastRateLimitSeen_synch_rateLimitLock = rateLimit.remaining;
+
+			resetDate = this.rateLimitResetTime_synch_rateLimitLock;
+		}
+
+		long remainingTimeInSecs = (resetDate - System.currentTimeMillis()) / 1000;
+
+		return Optional.of(new Long[] { (long) rateLimit.remaining, remainingTimeInSecs, (long) rateLimit.limit });
 
 	}
 
@@ -342,12 +370,9 @@ public class ServerInstance {
 
 			Long lastFullScan = db.getLong(Database.LAST_FULL_SCAN).orElse(null);
 
-			if (queue.availableWork() == 0 && this.fullScanInProgress) {
+			if (queue.availableWork() == 0 && queue.activeResources() == 0 && this.fullScanInProgress) {
 				// A full scan is considered completed if it starts, and then the available work
 				// dropped to 0.
-
-				// TODO: Is there a race condition where availableWork drops to zero in the
-				// early stages of a new job starting?
 
 				this.fullScanInProgress = false;
 				lastFullScan = System.currentTimeMillis();
@@ -362,30 +387,30 @@ public class ServerInstance {
 
 			boolean fullScanRequired = (hour == 3 || !getDb().isDatabaseInitialized() || lastFullScan == null);
 
-			if (!fullScanRequired) {
+			if (!fullScanRequired && queue.availableWork() + queue.activeResources() <= 10) {
 
-				if (queue.availableWork() <= 100) {
+				if (System.nanoTime() >= nextEventScanInNanos.get() && !this.fullScanInProgress
+						&& lastFullScan != null) {
 
-					if (System.nanoTime() >= nextEventScanInNanos.get() && !this.fullScanInProgress
-							&& lastFullScan != null) {
-						nextEventScanInNanos.set(System.nanoTime() + timeBetweenEventScansInNanos);
+					// Perform an event scan on each of the owner containers
+					for (OwnerContainer oc : ghOwners) {
+						ProcessIteratorReturnValue retVal = EventScan.doEventScan(oc, data, queue, lastFullScan);
 
-						for (OwnerContainer oc : ghOwners) {
-							ProcessIteratorReturnValue retVal = EventScan.doEventScan(oc, data, queue, lastFullScan);
-
-							if (retVal.isFullScanRequired() && !fullScanRequired) {
-								log.logInfo("Setting 'runFullScan' to true based on event scan");
-								fullScanRequired = true;
-							}
-
-							List<String> newEventHashes = retVal.getNewEventHashes();
-							db.addProcessedEvents(newEventHashes);
+						// Event scan can detect that a full scan is required
+						if (retVal.isFullScanRequired() && !fullScanRequired) {
+							log.logInfo("Setting 'runFullScan' to true based on event scan");
+							fullScanRequired = true;
 						}
-					}
 
+						// For events that we processed during the scan, persist them to the DB
+						List<String> newEventHashes = retVal.getNewEventHashes();
+						db.addProcessedEvents(newEventHashes);
+					}
+					nextEventScanInNanos.set(System.nanoTime() + timeBetweenEventScansInNanos);
 				}
 			}
 
+			// Start a scan if one is needed, and one hasn't run already today
 			if (fullScanRequired && !fullScanInProgress) {
 
 				if (!getDb().isDatabaseInitialized()) {

@@ -81,6 +81,7 @@ public class JavaNetHttpClient {
 			InputStream is = httpRequest.getInputStream();
 
 			body = getBody(is);
+			is.close();
 
 			if (code != 200) {
 				throw new RuntimeException("Request failed - HTTP Code: " + code + "  body: " + body);
