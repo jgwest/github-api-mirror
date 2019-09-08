@@ -54,7 +54,6 @@ public class GHApiMirrorHttpClient {
 					UserRepositoriesJson.class);
 			return Optional.of(response.getResponse());
 		} catch (GHApiMirrorClientException e) {
-//			e.printStackTrace();
 			return Optional.empty();
 		}
 	}
@@ -65,7 +64,6 @@ public class GHApiMirrorHttpClient {
 			ApiResponse<OrganizationJson> response = client.get("/organization/" + name, OrganizationJson.class);
 			return Optional.of(response.getResponse());
 		} catch (GHApiMirrorClientException e) {
-//			e.printStackTrace();
 			return Optional.empty();
 		}
 	}
@@ -80,7 +78,6 @@ public class GHApiMirrorHttpClient {
 					.get("/repository/" + ownerType + "/" + ownerName + "/" + repoName, RepositoryJson.class);
 			return Optional.of(response.getResponse());
 		} catch (GHApiMirrorClientException e) {
-//			e.printStackTrace();
 			return Optional.empty();
 		}
 
@@ -96,7 +93,6 @@ public class GHApiMirrorHttpClient {
 					.get("/issue/" + ownerType + "/" + ownerName + "/" + repoName + "/" + issueNumber, IssueJson.class);
 			return Optional.of(response.getResponse());
 		} catch (GHApiMirrorClientException e) {
-//			e.printStackTrace();
 			return Optional.empty();
 		}
 	}
@@ -107,7 +103,6 @@ public class GHApiMirrorHttpClient {
 			ApiResponse<UserJson> response = client.get("/user/" + loginName, UserJson.class);
 			return Optional.of(response.getResponse());
 		} catch (GHApiMirrorClientException e) {
-//			e.printStackTrace();
 			return Optional.empty();
 		}
 
@@ -124,7 +119,28 @@ public class GHApiMirrorHttpClient {
 					BulkIssuesJson.class);
 			return Optional.of(response.getResponse());
 		} catch (GHApiMirrorClientException e) {
-//			e.printStackTrace();
+			return Optional.empty();
+		}
+
+	}
+
+	public Optional<BulkIssuesJson> getBulkIssues(Owner owner, String repoName, List<Integer> individualIssues) {
+
+		String ownerType = owner.getType() == Type.ORG ? OWNER_TYPE_ORG : OWNER_TYPE_USER;
+		String ownerName = owner.getName();
+
+		try {
+
+			String issueList = individualIssues.stream().sorted().map(e -> e + ",").reduce((a, b) -> a + b).get();
+			while (issueList.endsWith(",")) {
+				issueList = issueList.substring(0, issueList.length() - 1);
+			}
+
+			ApiResponse<BulkIssuesJson> response = client.get(
+					"/bulk/issue/" + ownerType + "/" + ownerName + "/" + repoName + "?issueList=" + issueList,
+					BulkIssuesJson.class);
+			return Optional.of(response.getResponse());
+		} catch (GHApiMirrorClientException e) {
 			return Optional.empty();
 		}
 
@@ -143,7 +159,6 @@ public class GHApiMirrorHttpClient {
 			return result;
 
 		} catch (GHApiMirrorClientException e) {
-//			e.printStackTrace();
 			return Collections.emptyList();
 		}
 

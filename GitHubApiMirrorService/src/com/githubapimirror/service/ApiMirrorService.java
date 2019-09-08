@@ -16,6 +16,7 @@
 
 package com.githubapimirror.service;
 
+import java.util.Arrays;
 import java.util.List;
 
 import javax.ws.rs.GET;
@@ -126,8 +127,8 @@ public class ApiMirrorService {
 	@GET
 	@Path("/bulk/issue/{ownerType}/{ownerName}/{repoName}")
 	public Response getBulkIssues(@PathParam("ownerType") String ownerType, @PathParam("ownerName") String ownerName,
-			@PathParam("repoName") String repoName, @QueryParam("start") int startIssue,
-			@QueryParam("end") int endIssue) {
+			@PathParam("repoName") String repoName, @QueryParam("start") Integer startIssue,
+			@QueryParam("end") Integer endIssue, @QueryParam("issueList") String issueList) {
 		verifyHeaderAuth();
 
 		Owner owner = getOwner(ownerType, ownerName);
@@ -138,10 +139,27 @@ public class ApiMirrorService {
 
 		List<IssueJson> results = result.getIssues();
 
-		for (int x = startIssue; x <= endIssue; x++) {
-			db.getIssue(owner, repoName, x).ifPresent(e -> {
-				results.add(e);
-			});
+		if (startIssue != null && endIssue != null) {
+
+			for (int x = startIssue; x <= endIssue; x++) {
+				db.getIssue(owner, repoName, x).ifPresent(e -> {
+					results.add(e);
+				});
+			}
+
+		} else if (issueList != null) {
+			// Comma-separated issue list
+
+			Arrays.asList(issueList.split(",")).stream().map(e -> e.trim()).filter(e -> e.length() > 0)
+					.map(e -> Integer.parseInt(e)).forEach(issue -> {
+						db.getIssue(owner, repoName, issue).ifPresent(e -> {
+							results.add(e);
+						});
+
+					});
+
+		} else {
+			return Response.status(Status.BAD_REQUEST).build();
 		}
 
 		return Response.ok(JsonUtil.toString(result)).type(MediaType.APPLICATION_JSON_TYPE).build();

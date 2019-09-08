@@ -106,6 +106,7 @@ public class WorkerThread extends Thread {
 					queue.addOwner(ownerContainer);
 				} finally {
 					timeOut.reset();
+					queue.markAsProcessed(ownerContainer);
 				}
 				continue;
 
@@ -122,6 +123,8 @@ public class WorkerThread extends Thread {
 					queue.addRepository(repo.getOwner(), repo.getRepo());
 				} finally {
 					timeOut.reset();
+					queue.markAsProcessed(repo);
+
 				}
 
 				continue;
@@ -137,6 +140,7 @@ public class WorkerThread extends Thread {
 					queue.addIssue(issue.getIssue(), issue.getRepo().orElse(null), issue.getOwner());
 				} finally {
 					timeOut.reset();
+					queue.markAsProcessed(issue);
 				}
 
 				continue;
@@ -152,6 +156,7 @@ public class WorkerThread extends Thread {
 					queue.addUserRetry(user);
 				} finally {
 					timeOut.reset();
+					queue.markAsProcessed(user);
 				}
 
 				continue;
@@ -255,9 +260,7 @@ public class WorkerThread extends Thread {
 
 		int issueNumber = issue.getNumber();
 
-//		String fullParentName = repo.getFullName();
 		String repoName = repo.getName();
-//		String orgName = fullParentName.substring(0, fullParentName.indexOf("/"));
 
 		if (filter != null && !filter.processIssue(issueContainer.getOwner(), repoName, issueNumber)) {
 			return;

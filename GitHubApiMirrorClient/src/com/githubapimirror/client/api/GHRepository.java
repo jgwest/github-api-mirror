@@ -132,7 +132,7 @@ public class GHRepository {
 		}
 
 		// Convert the range of issues to acquire into blocks of 30
-		List<List<Integer>> workUnits = new ArrayList<>();
+		List<WorkUnit> workUnits = new ArrayList<>();
 		{
 			List<Integer> currUnit = new ArrayList<>();
 			for (int x = firstIssue; x <= lastIssue; x++) {
@@ -140,21 +140,49 @@ public class GHRepository {
 				currUnit.add(x);
 
 				if (currUnit.size() >= 30) {
-
-					convertToSimpleWorkUnit(currUnit);
-					workUnits.add(currUnit);
-
-					currUnit = new ArrayList<>();
+					workUnits.add(convertToSimpleWorkUnit(currUnit));
+					currUnit.clear();
 				}
 
 			}
 
 			if (currUnit.size() > 0) {
-				convertToSimpleWorkUnit(currUnit);
-				workUnits.add(currUnit);
+				workUnits.add(convertToSimpleWorkUnit(currUnit));
 
 			}
 		}
+
+		return executeBulkListIssuesWorkerThreads(workUnits);
+	}
+
+	/** Retrieves issues, in groups of 30, using multiple threads. */
+	public List<GHIssue> bulkListIssues(List<Integer> individualIssues) {
+
+		// Convert the range of issues to acquire into blocks of 30
+		List<WorkUnit> workUnits = new ArrayList<>();
+		{
+			List<Integer> currUnit = new ArrayList<>();
+
+			for (int currIssue : individualIssues) {
+
+				currUnit.add(currIssue);
+
+				if (currUnit.size() >= 30) {
+					workUnits.add(new WorkUnit(new ArrayList<Integer>(currUnit)));
+					currUnit.clear();
+				}
+
+			}
+
+			if (currUnit.size() > 0) {
+				workUnits.add(new WorkUnit(new ArrayList<Integer>(currUnit)));
+			}
+		}
+
+		return executeBulkListIssuesWorkerThreads(workUnits);
+	}
+
+	private List<GHIssue> executeBulkListIssuesWorkerThreads(List<WorkUnit> workUnits) {
 
 		List<GHIssue> results = new ArrayList<>();
 		{
@@ -183,10 +211,10 @@ public class GHRepository {
 				// Queue work to new threads
 				while (activeThreads.size() < 10 && workUnits.size() > 0) {
 
-					List<Integer> workUnit = workUnits.remove(0);
+					WorkUnit workUnit = workUnits.remove(0);
 
-					BulkListIssuesWorkerThread wt = new BulkListIssuesWorkerThread(owner, name, workUnit.get(0),
-							workUnit.get(1), connInfo.getClient());
+					BulkListIssuesWorkerThread wt = new BulkListIssuesWorkerThread(owner, name, workUnit,
+							connInfo.getClient());
 					wt.start();
 					activeThreads.add(wt);
 				}
@@ -203,13 +231,11 @@ public class GHRepository {
 		return results;
 	}
 
-	private static void convertToSimpleWorkUnit(List<Integer> currUnit) {
+	private static WorkUnit convertToSimpleWorkUnit(List<Integer> currUnit) {
 		int unitStart = currUnit.get(0);
 		int unitEnd = currUnit.get(currUnit.size() - 1);
 
-		currUnit.clear();
-		currUnit.add(unitStart);
-		currUnit.add(unitEnd);
+		return new WorkUnit(unitStart, unitEnd);
 	}
 
 	/**
@@ -238,6 +264,38 @@ public class GHRepository {
 		}
 	}
 
+	private static class WorkUnit {
+		private final Integer startRange;
+		private final Integer endRange;
+
+		private final List<Integer> issueList;
+
+		public WorkUnit(int startRange, int endRange) {
+			this.startRange = startRange;
+			this.endRange = endRange;
+			this.issueList = null;
+		}
+
+		public WorkUnit(List<Integer> issueList) {
+			this.startRange = null;
+			this.endRange = null;
+			this.issueList = issueList;
+		}
+
+		public Integer getStartRange() {
+			return startRange;
+		}
+
+		public Integer getEndRange() {
+			return endRange;
+		}
+
+		public List<Integer> getIssueList() {
+			return issueList;
+		}
+
+	}
+
 	/**
 	 * Used by bulkListIssues(): This worker thread issues requests to the mirror
 	 * API, in groups of 30.
@@ -246,8 +304,7 @@ public class GHRepository {
 	 */
 	private static class BulkListIssuesWorkerThread extends Thread {
 
-		private final int start;
-		private final int end;
+		private final WorkUnit workUnit;
 
 		private final GHApiMirrorHttpClient client;
 
@@ -261,10 +318,9 @@ public class GHRepository {
 
 		private boolean threadComplete_synch_lock = false;
 
-		public BulkListIssuesWorkerThread(Owner owner, String repo, int start, int end, GHApiMirrorHttpClient client) {
+		public BulkListIssuesWorkerThread(Owner owner, String repo, WorkUnit workUnit, GHApiMirrorHttpClient client) {
 			setName(BulkListIssuesWorkerThread.class.getName());
-			this.start = start;
-			this.end = end;
+			this.workUnit = workUnit;
 			this.client = client;
 			this.repoName = repo;
 			this.owner = owner;
@@ -273,7 +329,18 @@ public class GHRepository {
 		@Override
 		public void run() {
 			try {
-				BulkIssuesJson json = client.getBulkIssues(owner, repoName, start, end).orElse(null);
+				BulkIssuesJson json = null;
+				if (workUnit.getStartRange() != null && workUnit.getEndRange() != null) {
+					json = client.getBulkIssues(owner, repoName, workUnit.getStartRange(), workUnit.getEndRange())
+							.orElse(null);
+
+				} else if (workUnit.getIssueList() != null) {
+
+					json = client.getBulkIssues(owner, repoName, workUnit.getIssueList()).orElse(null);
+
+				} else {
+					System.err.println("Invalid worker thread request.");
+				}
 
 				if (json != null) {
 					synchronized (lock) {
@@ -286,6 +353,8 @@ public class GHRepository {
 					threadComplete_synch_lock = true;
 				}
 			}
+
+			// TODO: Either implement retry, or percolate this back to the calling method.
 		}
 
 		public boolean isComplete() {
