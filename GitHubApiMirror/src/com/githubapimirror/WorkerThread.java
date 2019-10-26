@@ -407,6 +407,8 @@ public class WorkerThread extends Thread {
 			}
 		});
 
+		// TODO: Compare old and new versions here, and report differences.
+
 		// Compare the old version of the database entry, and the current version; if
 		// different, create a change event and add it to the database.
 		if (!JsonUtil.isEqual(oldDbVersion, json, new ObjectMapper())) {

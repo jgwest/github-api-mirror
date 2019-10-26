@@ -102,6 +102,14 @@ public class ApiMirrorInstance {
 				builder = builder.numRequestsPerHour(sf.getGithubRateLimit());
 			}
 
+			if (sf.getTimeBetweenEventScansInSeconds() != null) {
+				builder.timeBetweenEventScansInSeconds(sf.getTimeBetweenEventScansInSeconds());
+			}
+
+			if (sf.getPauseBetweenRequestsInMsecs() != null) {
+				builder.pauseBetweenRequestsInMsecs(sf.getPauseBetweenRequestsInMsecs());
+			}
+
 			this.serverInstance = builder.build();
 
 			db = serverInstance.getDb();

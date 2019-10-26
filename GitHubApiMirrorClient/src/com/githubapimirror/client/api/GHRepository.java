@@ -184,48 +184,64 @@ public class GHRepository {
 
 	private List<GHIssue> executeBulkListIssuesWorkerThreads(List<WorkUnit> workUnits) {
 
+		Throwable throwable = null;
+
 		List<GHIssue> results = new ArrayList<>();
-		{
-			List<BulkListIssuesWorkerThread> activeThreads = new ArrayList<>();
+		List<BulkListIssuesWorkerThread> activeThreads = new ArrayList<>();
 
-			int count = 0;
+		int count = 0;
 
-			while (workUnits.size() > 0 || activeThreads.size() > 0) {
+		outer_while: while (workUnits.size() > 0 || activeThreads.size() > 0) {
 
-				// Clear completed threads
-				for (Iterator<BulkListIssuesWorkerThread> it = activeThreads.iterator(); it.hasNext();) {
-					BulkListIssuesWorkerThread wt = it.next();
-					if (wt.isComplete()) {
-						wt.getResults().ifPresent(e -> {
+			// Clear completed threads
+			for (Iterator<BulkListIssuesWorkerThread> it = activeThreads.iterator(); it.hasNext();) {
+				BulkListIssuesWorkerThread wt = it.next();
 
-							for (IssueJson jsonIssue : e) {
-								GHIssue issue = new GHIssue(jsonIssue, connInfo);
-								results.add(issue);
-							}
+				if (wt.getThrowable().isPresent()) {
+					// On first failing worker thread, bail out of the loops
+					throwable = wt.getThrowable().get();
+					break outer_while;
 
-						});
-						it.remove();
-					}
+				} else if (wt.isComplete()) {
+					wt.getResults().ifPresent(e -> {
+
+						for (IssueJson jsonIssue : e) {
+							GHIssue issue = new GHIssue(jsonIssue, connInfo);
+							results.add(issue);
+						}
+
+					});
+					it.remove();
 				}
-
-				// Queue work to new threads
-				while (activeThreads.size() < 10 && workUnits.size() > 0) {
-
-					WorkUnit workUnit = workUnits.remove(0);
-
-					BulkListIssuesWorkerThread wt = new BulkListIssuesWorkerThread(owner, name, workUnit,
-							connInfo.getClient());
-					wt.start();
-					activeThreads.add(wt);
-				}
-
-				count++;
-
-				if (count % 5 == 0) {
-					GHApiUtil.sleep(20);
-				}
-
 			}
+
+			// Queue work to new threads
+			while (activeThreads.size() < 10 && workUnits.size() > 0) {
+
+				WorkUnit workUnit = workUnits.remove(0);
+
+				BulkListIssuesWorkerThread wt = new BulkListIssuesWorkerThread(owner, name, workUnit,
+						connInfo.getClient());
+				wt.start();
+				activeThreads.add(wt);
+			}
+
+			count++;
+
+			if (count % 5 == 0) {
+				GHApiUtil.sleep(20);
+			}
+
+		}
+
+		if (throwable != null) {
+			try {
+				activeThreads.forEach(e -> e.interrupt());
+			} catch (Exception e) {
+				/* ignore */
+			}
+
+			GHApiUtil.throwAsUnchecked(throwable);
 		}
 
 		return results;
@@ -318,6 +334,8 @@ public class GHRepository {
 
 		private boolean threadComplete_synch_lock = false;
 
+		private Optional<Throwable> throwable_sync_lock = Optional.empty();
+
 		public BulkListIssuesWorkerThread(Owner owner, String repo, WorkUnit workUnit, GHApiMirrorHttpClient client) {
 			setName(BulkListIssuesWorkerThread.class.getName());
 			this.workUnit = workUnit;
@@ -329,32 +347,45 @@ public class GHRepository {
 		@Override
 		public void run() {
 			try {
-				BulkIssuesJson json = null;
-				if (workUnit.getStartRange() != null && workUnit.getEndRange() != null) {
-					json = client.getBulkIssues(owner, repoName, workUnit.getStartRange(), workUnit.getEndRange())
-							.orElse(null);
 
-				} else if (workUnit.getIssueList() != null) {
+				GHApiUtil.waitForPass(3, false, 2000, 2, 10 * 1000, () -> {
+					// Issue a bulk issue request up to 3 times, retrying on failure, otherwise
+					// throw the last exception.
+					BulkIssuesJson json = null;
+					if (workUnit.getStartRange() != null && workUnit.getEndRange() != null) {
+						json = client.getBulkIssues(owner, repoName, workUnit.getStartRange(), workUnit.getEndRange())
+								.orElse(null);
 
-					json = client.getBulkIssues(owner, repoName, workUnit.getIssueList()).orElse(null);
+					} else if (workUnit.getIssueList() != null) {
 
-				} else {
-					System.err.println("Invalid worker thread request.");
-				}
+						json = client.getBulkIssues(owner, repoName, workUnit.getIssueList()).orElse(null);
 
-				if (json != null) {
-					synchronized (lock) {
-						results_synch_lock.addAll(json.getIssues());
+					} else {
+						throw new RuntimeException("Invalid worker thread request.");
 					}
+
+					if (json != null) {
+						synchronized (lock) {
+							results_synch_lock.addAll(json.getIssues());
+						}
+					}
+				});
+
+			} catch (Throwable t) {
+				synchronized (lock) {
+					this.throwable_sync_lock = Optional.of(t);
 				}
+				GHApiUtil.throwAsUnchecked(t);
 
 			} finally {
 				synchronized (lock) {
 					threadComplete_synch_lock = true;
 				}
 			}
+		}
 
-			// TODO: Either implement retry, or percolate this back to the calling method.
+		public Optional<Throwable> getThrowable() {
+			return throwable_sync_lock;
 		}
 
 		public boolean isComplete() {

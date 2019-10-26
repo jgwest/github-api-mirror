@@ -68,16 +68,17 @@ public class WorkQueue {
 
 	private long nextWorkAvailableInNanos_synch_lock = Long.MIN_VALUE;
 
-	// TODO: Move this to YAML
-	private static final int MAX_REQUEST_PER_SECOND_IN_MSECS = (int) (1000 / 3); // 3 per second
+	private final long pauseBetweenRequestsInMsecs;
 
 	private static final GHLog log = GHLog.getInstance();
 
-	public WorkQueue(ServerInstance serverInstance, Database db, int numRequestsPerHourParam) {
+	public WorkQueue(ServerInstance serverInstance, Database db, int numRequestsPerHourParam,
+			long pauseBetweenRequestsInMsecs) {
 		this.db = db;
 		this.serverInstance = serverInstance;
 
 		this.numRequestsPerHour = numRequestsPerHourParam;
+		this.pauseBetweenRequestsInMsecs = pauseBetweenRequestsInMsecs;
 
 	}
 
@@ -213,6 +214,8 @@ public class WorkQueue {
 					secondsRemaining = 0;
 				}
 
+				requestsRemaining -= 250; // Subtract 250, so as to leave a buffer of ~5% of default GitHub queue
+
 				if (requestsRemaining <= 0) {
 					requestsRemaining = 1;
 				}
@@ -230,7 +233,10 @@ public class WorkQueue {
 					} else if (timeToWaitInSeconds > 10) {
 						timeToWaitInSeconds = 10;
 					}
-					System.out.println("tws: " + timeToWaitInSeconds); // TODO: Remove this.
+
+					// TODO: Remove this.
+					log.logDebug(
+							"timeToWatchInSeconds in " + this.getClass().getSimpleName() + ": " + timeToWaitInSeconds);
 
 					long timeToWaitInNanos = TimeUnit.NANOSECONDS.convert(timeToWaitInSeconds, TimeUnit.SECONDS);
 
@@ -238,7 +244,7 @@ public class WorkQueue {
 
 						// Set a maximum number of requests per second
 						timeToWaitInNanos = TimeUnit.NANOSECONDS
-								.convert(estimatedRequests * MAX_REQUEST_PER_SECOND_IN_MSECS, TimeUnit.MILLISECONDS);
+								.convert(estimatedRequests * this.pauseBetweenRequestsInMsecs, TimeUnit.MILLISECONDS);
 					}
 
 					result = System.nanoTime() + timeToWaitInNanos;

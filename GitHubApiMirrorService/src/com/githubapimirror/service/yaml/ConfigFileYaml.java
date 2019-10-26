@@ -38,6 +38,10 @@ public class ConfigFileYaml {
 
 	private Integer githubRateLimit;
 
+	private Long timeBetweenEventScansInSeconds;
+
+	private Long pauseBetweenRequestsInMsecs;
+
 	public String getGithubServer() {
 		return githubServer;
 	}
@@ -108,6 +112,22 @@ public class ConfigFileYaml {
 
 	public void setUserRepoList(List<String> userRepoList) {
 		this.userRepoList = userRepoList;
+	}
+
+	public Long getTimeBetweenEventScansInSeconds() {
+		return timeBetweenEventScansInSeconds;
+	}
+
+	public void setTimeBetweenEventScansInSeconds(Long timeBetweenEventScansInSeconds) {
+		this.timeBetweenEventScansInSeconds = timeBetweenEventScansInSeconds;
+	}
+
+	public Long getPauseBetweenRequestsInMsecs() {
+		return pauseBetweenRequestsInMsecs;
+	}
+
+	public void setPauseBetweenRequestsInMsecs(Long pauseBetweenRequestsInMsecs) {
+		this.pauseBetweenRequestsInMsecs = pauseBetweenRequestsInMsecs;
 	}
 
 }
