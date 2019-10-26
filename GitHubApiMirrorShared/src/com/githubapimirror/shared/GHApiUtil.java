@@ -21,6 +21,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -73,6 +74,8 @@ public class GHApiUtil {
 
 		if (t instanceof RuntimeException) {
 			throw (RuntimeException) t;
+		} else if (t instanceof IOException) {
+			throw new UncheckedIOException((IOException) t);
 		} else if (t instanceof Error) {
 			throw (Error) t;
 		} else {
@@ -88,4 +91,40 @@ public class GHApiUtil {
 			throwAsUnchecked(e);
 		}
 	}
+
+	/**
+	 * Keep calling a runnable until it no longer throws an exception; use an
+	 * exponential backoff between failures.
+	 */
+	public static void waitForPass(int numberOfAttempts, boolean showExceptions, long initialDelayOnFailureInMsecs,
+			double growthRate, long maxDelayInMsecs, Runnable r) throws Throwable {
+
+		Throwable lastThrowable = null;
+
+		long delay = initialDelayOnFailureInMsecs;
+
+		while (numberOfAttempts > 0) {
+			numberOfAttempts--;
+
+			try {
+				r.run();
+				return;
+			} catch (Throwable t) {
+				if (showExceptions) {
+					t.printStackTrace();
+				}
+
+				lastThrowable = t;
+				GHApiUtil.sleep(delay);
+				delay *= growthRate;
+				if (delay >= maxDelayInMsecs) {
+					delay = maxDelayInMsecs;
+				}
+			}
+
+		}
+
+		throw lastThrowable;
+	}
+
 }

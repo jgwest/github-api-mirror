@@ -67,8 +67,7 @@ public class ServerInstance {
 
 	private final Database db;
 
-	// TODO: Move this to yaml
-	private final long timeBetweenEventScansInNanos = TimeUnit.NANOSECONDS.convert(1, TimeUnit.MINUTES);
+	private final long timeBetweenEventScansInNanos;
 
 	private final BackgroundSchedulerThread backgroundSchedulerThread;
 
@@ -91,12 +90,15 @@ public class ServerInstance {
 	private final Object rateLimitLock = new Object();
 
 	private ServerInstance(String username, String password, String serverName, List<String> orgNames,
-			List<String> userRepos, List<String> individualRepos, File dbDir, GhmFilter filter,
-			int numRequestsPerHour) {
+			List<String> userRepos, List<String> individualRepos, long pauseBetweenRequestsInMsecs, File dbDir,
+			long timeBetweenEventScansInSeconds, GhmFilter filter, int numRequestsPerHour) {
 
 		if (filter == null) {
 			filter = new PermissiveFilter();
 		}
+
+		this.timeBetweenEventScansInNanos = TimeUnit.NANOSECONDS.convert(timeBetweenEventScansInSeconds,
+				TimeUnit.SECONDS);
 
 		// Verify that we don't have both an org, and an individual repo under that org.
 		// eg: asking the server to index both the eclipse org, and the
@@ -113,7 +115,7 @@ public class ServerInstance {
 
 		db.uninitializeDatabaseOnContentsMismatch(orgNames, userRepos, individualRepos);
 
-		queue = new WorkQueue(this, db, numRequestsPerHour);
+		queue = new WorkQueue(this, db, numRequestsPerHour, pauseBetweenRequestsInMsecs);
 
 		GitHub githubClient;
 		boolean weSupportRateLimit = false;
@@ -322,8 +324,8 @@ public class ServerInstance {
 							&& lastRateLimitSeen_synch_rateLimitLock < rateLimit.remaining)) {
 				this.rateLimitResetTime_synch_rateLimitLock = rateLimit.getResetDate().getTime();
 
-				log.logInfo(
-						"Updating rate limit reset time, now:" + new Date(this.rateLimitResetTime_synch_rateLimitLock));
+				log.logInfo("Updating rate limit reset time, now: "
+						+ new Date(this.rateLimitResetTime_synch_rateLimitLock));
 			}
 
 			lastRateLimitSeen_synch_rateLimitLock = rateLimit.remaining;
@@ -394,7 +396,8 @@ public class ServerInstance {
 
 					// Perform an event scan on each of the owner containers
 					for (OwnerContainer oc : ghOwners) {
-						ProcessIteratorReturnValue retVal = EventScan.doEventScan(oc, data, queue, lastFullScan);
+						ProcessIteratorReturnValue retVal = EventScan.doEventScan(oc, data, queue, lastFullScan,
+								githubClientInstance, egitClient);
 
 						// Event scan can detect that a full scan is required
 						if (retVal.isFullScanRequired() && !fullScanRequired) {
@@ -410,7 +413,7 @@ public class ServerInstance {
 				}
 			}
 
-			// Start a scan if one is needed, and one hasn't run already today
+			// Start a full scan if one is needed, and one hasn't already run today
 			if (fullScanRequired && !fullScanInProgress) {
 
 				if (!getDb().isDatabaseInitialized()) {
@@ -475,6 +478,10 @@ public class ServerInstance {
 		private List<String> individualRepos = new ArrayList<>();
 		private File dbDir;
 		private GhmFilter filter;
+
+		private long timeBetweenEventScansInSeconds = TimeUnit.SECONDS.convert(10, TimeUnit.MINUTES);
+
+		private long pauseBetweenRequestsInMsecs = 500;
 
 		private int numRequestsPerHour = 5000;
 
@@ -550,9 +557,19 @@ public class ServerInstance {
 			return this;
 		}
 
+		public ServerInstanceBuilder timeBetweenEventScansInSeconds(long timeBetweenEventScansInSeconds) {
+			this.timeBetweenEventScansInSeconds = timeBetweenEventScansInSeconds;
+			return this;
+		}
+
+		public ServerInstanceBuilder pauseBetweenRequestsInMsecs(long pauseBetweenRequestsInMsecs) {
+			this.pauseBetweenRequestsInMsecs = pauseBetweenRequestsInMsecs;
+			return this;
+		}
+
 		public ServerInstance build() {
-			return new ServerInstance(username, password, serverName, orgNames, userRepos, individualRepos, dbDir,
-					filter, numRequestsPerHour);
+			return new ServerInstance(username, password, serverName, orgNames, userRepos, individualRepos,
+					pauseBetweenRequestsInMsecs, dbDir, timeBetweenEventScansInSeconds, filter, numRequestsPerHour);
 		}
 
 	}
