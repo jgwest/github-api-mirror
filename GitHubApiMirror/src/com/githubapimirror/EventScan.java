@@ -35,6 +35,7 @@ import org.kohsuke.github.GHEventInfo;
 import org.kohsuke.github.GHEventPayload;
 import org.kohsuke.github.GHEventPayload.Issue;
 import org.kohsuke.github.GHEventPayload.IssueComment;
+import org.kohsuke.github.GHException;
 import org.kohsuke.github.GHIssue;
 import org.kohsuke.github.GHOrganization;
 import org.kohsuke.github.GHRepository;
@@ -90,21 +91,37 @@ public class EventScan {
 			ownerName = org.getLogin();
 			repoEventsIterator = org.listEvents().iterator();
 
+			ProcessIteratorReturnValue resultPirv = null;
+
 			// First scan the repo events
-			ProcessIteratorReturnValue resultPirv = processRepoEventIterator(repoEventsIterator, Owner.org(ownerName),
-					"*", data, workQueue, lastFullScan, repoCache, processedIssues);
+			try {
+				resultPirv = processRepoEventIterator(repoEventsIterator, Owner.org(ownerName), "*", data, workQueue,
+						lastFullScan, repoCache, processedIssues);
+			} catch (GHException ghe) {
+				// This occurs every so often, and we will rescan the offending repo on the next
+				// pass, so just print it as a single line and move on.
+				System.err
+						.println("Ignoring GHException - " + ghe.getClass().getSimpleName() + ": " + ghe.getMessage());
+			}
 
 			// Next scan the issue events
 			for (PagedIterator<GHRepository> repoIterator = org.listRepositories().iterator(); repoIterator
 					.hasNext();) {
 
 				GHRepository repo = repoIterator.next();
+				try {
+					ProcessIteratorReturnValue pirv = processIssueEventList(
+							issueService.pageEvents(ownerName, repo.getName()), Owner.org(ownerName), repo.getName(),
+							workQueue, lastFullScan, data, gitClient, egitClient, repoCache, processedIssues);
 
-				ProcessIteratorReturnValue pirv = processIssueEventList(
-						issueService.pageEvents(ownerName, repo.getName()), Owner.org(ownerName), repo.getName(),
-						workQueue, lastFullScan, data, gitClient, egitClient, repoCache, processedIssues);
+					resultPirv = combine(resultPirv, pirv);
+				} catch (GHException ghe) {
+					// This occurs every so often, and we will rescan the offending repo on the next
+					// pass, so just print it as a single line and move on.
+					System.err.println(
+							"Ignoring GHException - " + ghe.getClass().getSimpleName() + ": " + ghe.getMessage());
+				}
 
-				resultPirv = combine(resultPirv, pirv);
 			}
 
 			return resultPirv;
@@ -115,9 +132,19 @@ public class EventScan {
 			ownerName = user.getLogin();
 			repoEventsIterator = user.listEvents().iterator();
 
+			ProcessIteratorReturnValue resultPirv = null;
+
 			// First scan the repo events
-			ProcessIteratorReturnValue resultPirv = processRepoEventIterator(repoEventsIterator, Owner.user(ownerName),
-					"*", data, workQueue, lastFullScan, repoCache, processedIssues);
+			try {
+				resultPirv = processRepoEventIterator(repoEventsIterator, Owner.user(ownerName), "*", data, workQueue,
+						lastFullScan, repoCache, processedIssues);
+
+			} catch (GHException ghe) {
+				// This occurs every so often, and we will rescan the offending repo on the next
+				// pass, so just print it as a single line and move on.
+				System.err
+						.println("Ignoring GHException - " + ghe.getClass().getSimpleName() + ": " + ghe.getMessage());
+			}
 
 			// Next scan the issue events
 			for (PagedIterator<GHRepository> repoIterator = user.listRepositories().iterator(); repoIterator
@@ -125,11 +152,20 @@ public class EventScan {
 
 				GHRepository repo = repoIterator.next();
 
-				ProcessIteratorReturnValue pirv = processIssueEventList(
-						issueService.pageEvents(ownerName, repo.getName()), Owner.user(ownerName), repo.getName(),
-						workQueue, lastFullScan, data, gitClient, egitClient, repoCache, processedIssues);
+				try {
+					ProcessIteratorReturnValue pirv = processIssueEventList(
+							issueService.pageEvents(ownerName, repo.getName()), Owner.user(ownerName), repo.getName(),
+							workQueue, lastFullScan, data, gitClient, egitClient, repoCache, processedIssues);
 
-				resultPirv = combine(resultPirv, pirv);
+					resultPirv = combine(resultPirv, pirv);
+
+				} catch (GHException ghe) {
+					// This occurs every so often, and we will rescan the offending repo on the next
+					// pass, so just print it as a single line and move on.
+					System.err.println(
+							"Ignoring GHException - " + ghe.getClass().getSimpleName() + ": " + ghe.getMessage());
+				}
+
 			}
 
 			return resultPirv;
@@ -143,11 +179,19 @@ public class EventScan {
 			// First scan the repo events
 			for (GHRepository repo : ownerContainer.getIndividualRepos()) {
 
-				ProcessIteratorReturnValue pirv = processRepoEventIterator(repo.listEvents().iterator(),
-						ownerContainer.getOwner(), repo.getName(), data, workQueue, lastFullScan, repoCache,
-						processedIssues);
+				try {
+					ProcessIteratorReturnValue pirv = processRepoEventIterator(repo.listEvents().iterator(),
+							ownerContainer.getOwner(), repo.getName(), data, workQueue, lastFullScan, repoCache,
+							processedIssues);
 
-				result = result == null ? pirv : combine(result, pirv);
+					result = result == null ? pirv : combine(result, pirv);
+
+				} catch (GHException ghe) {
+					// This occurs every so often, and we will rescan the offending repo on the next
+					// pass, so just print it as a single line and move on.
+					System.err.println(
+							"Ignoring GHException - " + ghe.getClass().getSimpleName() + ": " + ghe.getMessage());
+				}
 
 			}
 
@@ -156,11 +200,20 @@ public class EventScan {
 
 				ownerName = ownerContainer.getOwner().getName();
 
-				ProcessIteratorReturnValue pirv = processIssueEventList(
-						issueService.pageEvents(ownerName, repo.getName()), Owner.user(ownerName), repo.getName(),
-						workQueue, lastFullScan, data, gitClient, egitClient, repoCache, processedIssues);
+				try {
+					ProcessIteratorReturnValue pirv = processIssueEventList(
+							issueService.pageEvents(ownerName, repo.getName()), Owner.user(ownerName), repo.getName(),
+							workQueue, lastFullScan, data, gitClient, egitClient, repoCache, processedIssues);
 
-				result = result == null ? pirv : combine(result, pirv);
+					result = result == null ? pirv : combine(result, pirv);
+
+				} catch (GHException ghe) {
+					// This occurs every so often, and we will rescan the offending repo on the next
+					// pass, so just print it as a single line and move on.
+					System.err.println(
+							"Ignoring GHException - " + ghe.getClass().getSimpleName() + ": " + ghe.getMessage());
+				}
+
 			}
 
 			return result;
