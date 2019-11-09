@@ -42,6 +42,9 @@ public class ConfigFileYaml {
 
 	private Long pauseBetweenRequestsInMsecs;
 
+	public ConfigFileYaml() {
+	}
+
 	public String getGithubServer() {
 		return githubServer;
 	}

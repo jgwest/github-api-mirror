@@ -14,38 +14,14 @@
  * limitations under the License. 
 */
 
-package com.githubapimirror.shared.json;
+package com.githubapimirror.client.api.events;
 
-import java.util.Map;
+import com.githubapimirror.shared.json.IssueEventJson;
 
-/** JSON Issue event response from the GitHub mirror server. */
-public class IssueEventRenamedJson {
+public class GHIssueEventMerged extends GHIssueEvent {
 
-	String from;
-	String to;
-
-	public IssueEventRenamedJson() {
-	}
-
-	public IssueEventRenamedJson(Map<Object, Object> map) {
-		from = (String) map.get("from");
-		to = (String) map.get("to");
-	}
-
-	public String getFrom() {
-		return from;
-	}
-
-	public void setFrom(String from) {
-		this.from = from;
-	}
-
-	public String getTo() {
-		return to;
-	}
-
-	public void setTo(String to) {
-		this.to = to;
+	public GHIssueEventMerged(IssueEventJson json) {
+		super(json);
 	}
 
 }

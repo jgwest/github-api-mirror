@@ -16,11 +16,34 @@
 
 package com.githubapimirror.shared.json;
 
+import java.util.Map;
+
 /** JSON Issue event response from the GitHub mirror server. */
 public class IssueEventAssignedUnassignedJson {
 
 	String assignee;
 	String assigner;
+
+	boolean assigned;
+
+	public IssueEventAssignedUnassignedJson() {
+	}
+
+	public IssueEventAssignedUnassignedJson(Map<Object, Object> mapParam) {
+
+		this.assignee = (String) mapParam.getOrDefault("assignee", null);
+		this.assigner = (String) mapParam.getOrDefault("assigner", null);
+		this.assigned = (boolean) mapParam.get("assigned");
+
+	}
+
+	public void setAssigned(boolean assigned) {
+		this.assigned = assigned;
+	}
+
+	public boolean isAssigned() {
+		return assigned;
+	}
 
 	public String getAssignee() {
 		return assignee;

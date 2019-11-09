@@ -222,8 +222,6 @@ public class EventScan {
 
 				if (createdAt.getTime() < lastFullScan) {
 
-					// TODO: This logic might have issues with events out of order.
-
 					if (fullScanRequired) {
 
 						log.logDebug("Event of " + repoName

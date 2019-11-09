@@ -14,40 +14,29 @@
  * limitations under the License. 
 */
 
-package com.githubapimirror.shared.json;
+package com.githubapimirror.client.api.events;
 
 import java.util.Map;
 
-/** JSON Issue event response from the GitHub mirror server. */
-public class IssueEventLabeledUnlabeledJson {
+import com.githubapimirror.shared.json.IssueEventJson;
+import com.githubapimirror.shared.json.IssueEventLabeledUnlabeledJson;
 
-	String label;
+public class GHIssueEventLabeledUnlabeled extends GHIssueEvent {
 
-	boolean labeled;
+	private final IssueEventLabeledUnlabeledJson labelData;
 
-	public IssueEventLabeledUnlabeledJson() {
-	}
-
-	public IssueEventLabeledUnlabeledJson(Map<Object, Object> map) {
-
-		label = (String) map.get("label");
-		labeled = (boolean) map.get("labeled");
+	@SuppressWarnings("unchecked")
+	public GHIssueEventLabeledUnlabeled(IssueEventJson json) {
+		super(json);
+		labelData = new IssueEventLabeledUnlabeledJson((Map<Object, Object>) json.getData());
 	}
 
 	public String getLabel() {
-		return label;
-	}
-
-	public void setLabel(String label) {
-		this.label = label;
+		return labelData.getLabel();
 	}
 
 	public boolean isLabeled() {
-		return labeled;
-	}
-
-	public void setLabeled(boolean labeled) {
-		this.labeled = labeled;
+		return labelData.isLabeled();
 	}
 
 }

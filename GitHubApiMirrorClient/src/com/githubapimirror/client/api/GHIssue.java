@@ -17,10 +17,19 @@
 package com.githubapimirror.client.api;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 
+import com.githubapimirror.client.api.events.GHIssueEvent;
+import com.githubapimirror.client.api.events.GHIssueEventAssignedUnassigned;
+import com.githubapimirror.client.api.events.GHIssueEventClosed;
+import com.githubapimirror.client.api.events.GHIssueEventLabeledUnlabeled;
+import com.githubapimirror.client.api.events.GHIssueEventMerged;
+import com.githubapimirror.client.api.events.GHIssueEventRenamed;
+import com.githubapimirror.client.api.events.GHIssueEventReopened;
 import com.githubapimirror.shared.json.IssueCommentJson;
+import com.githubapimirror.shared.json.IssueEventJson;
 import com.githubapimirror.shared.json.IssueJson;
 
 /** This class represents the result of querying the GitHub mirror Issue API. */
@@ -30,9 +39,56 @@ public class GHIssue {
 
 	private final IssueJson json;
 
+	private final List<GHIssueEvent> issueEvents;
+
 	public GHIssue(IssueJson jsonIssue, GHConnectInfo connInfo) {
 		this.connInfo = connInfo;
 		this.json = jsonIssue;
+
+		List<GHIssueEvent> events = new ArrayList<>();
+
+		for (IssueEventJson iej : json.getIssueEvents()) {
+
+			String type = iej.getType();
+
+			if (type.equals("labeled") || type.equals("unlabeled")) {
+
+				GHIssueEventLabeledUnlabeled ld = new GHIssueEventLabeledUnlabeled(iej);
+				events.add(ld);
+
+			} else if (type.equals("assigned") || type.equals("unassigned")) {
+
+				GHIssueEventAssignedUnassigned au = new GHIssueEventAssignedUnassigned(iej);
+				events.add(au);
+
+			} else if (type.equals("renamed")) {
+
+				GHIssueEventRenamed r = new GHIssueEventRenamed(iej);
+				events.add(r);
+
+			} else if (type.equals("reopened")) {
+
+				GHIssueEventReopened r = new GHIssueEventReopened(iej);
+				events.add(r);
+
+			} else if (type.equals("merged")) {
+
+				GHIssueEventMerged m = new GHIssueEventMerged(iej);
+				events.add(m);
+
+			} else if (type.equals("closed")) {
+
+				GHIssueEventClosed c = new GHIssueEventClosed(iej);
+				events.add(c);
+
+			} else {
+				System.err.println("Unrecognized event type " + iej.getType());
+			}
+
+		}
+
+		this.issueEvents = Collections.unmodifiableList(events);
+
 	}
 
 	public List<GHUser> getAssignees() {
@@ -103,4 +159,7 @@ public class GHIssue {
 		return json.isClosed();
 	}
 
+	public List<GHIssueEvent> getIssueEvents() {
+		return issueEvents;
+	}
 }
