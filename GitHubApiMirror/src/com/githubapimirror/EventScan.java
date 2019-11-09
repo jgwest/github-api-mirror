@@ -20,6 +20,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
@@ -28,6 +29,7 @@ import java.util.regex.Pattern;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.eclipse.egit.github.core.IssueEvent;
 import org.eclipse.egit.github.core.client.GitHubClient;
+import org.eclipse.egit.github.core.client.NoSuchPageException;
 import org.eclipse.egit.github.core.client.PageIterator;
 import org.eclipse.egit.github.core.service.IssueService;
 import org.kohsuke.github.GHEvent;
@@ -38,6 +40,7 @@ import org.kohsuke.github.GHEventPayload.IssueComment;
 import org.kohsuke.github.GHException;
 import org.kohsuke.github.GHIssue;
 import org.kohsuke.github.GHOrganization;
+import org.kohsuke.github.GHPerson;
 import org.kohsuke.github.GHRepository;
 import org.kohsuke.github.GHUser;
 import org.kohsuke.github.GitHub;
@@ -102,24 +105,22 @@ public class EventScan {
 				// pass, so just print it as a single line and move on.
 				System.err
 						.println("Ignoring GHException - " + ghe.getClass().getSimpleName() + ": " + ghe.getMessage());
+
 			}
 
 			// Next scan the issue events
-			for (PagedIterator<GHRepository> repoIterator = org.listRepositories().iterator(); repoIterator
-					.hasNext();) {
-
-				GHRepository repo = repoIterator.next();
+			for (GHRepository repo : getRandomizedRepositories(org)) {
 				try {
 					ProcessIteratorReturnValue pirv = processIssueEventList(
 							issueService.pageEvents(ownerName, repo.getName()), Owner.org(ownerName), repo.getName(),
 							workQueue, lastFullScan, data, gitClient, egitClient, repoCache, processedIssues);
 
 					resultPirv = combine(resultPirv, pirv);
-				} catch (GHException ghe) {
+				} catch (NoSuchPageException ghe) {
 					// This occurs every so often, and we will rescan the offending repo on the next
 					// pass, so just print it as a single line and move on.
 					System.err.println(
-							"Ignoring GHException - " + ghe.getClass().getSimpleName() + ": " + ghe.getMessage());
+							"Ignoring Exception - " + ghe.getClass().getSimpleName() + ": " + ghe.getMessage());
 				}
 
 			}
@@ -147,10 +148,7 @@ public class EventScan {
 			}
 
 			// Next scan the issue events
-			for (PagedIterator<GHRepository> repoIterator = user.listRepositories().iterator(); repoIterator
-					.hasNext();) {
-
-				GHRepository repo = repoIterator.next();
+			for (GHRepository repo : getRandomizedRepositories(user)) {
 
 				try {
 					ProcessIteratorReturnValue pirv = processIssueEventList(
@@ -159,11 +157,11 @@ public class EventScan {
 
 					resultPirv = combine(resultPirv, pirv);
 
-				} catch (GHException ghe) {
+				} catch (NoSuchPageException ghe) {
 					// This occurs every so often, and we will rescan the offending repo on the next
 					// pass, so just print it as a single line and move on.
 					System.err.println(
-							"Ignoring GHException - " + ghe.getClass().getSimpleName() + ": " + ghe.getMessage());
+							"Ignoring Exception - " + ghe.getClass().getSimpleName() + ": " + ghe.getMessage());
 				}
 
 			}
@@ -174,10 +172,14 @@ public class EventScan {
 
 		} else if (ownerContainer.getType() == OwnerContainer.Type.REPO_LIST) {
 
+			List<GHRepository> repos = new ArrayList<>(ownerContainer.getIndividualRepos());
+
+			Collections.shuffle(repos);
+
 			ProcessIteratorReturnValue result = null;
 
 			// First scan the repo events
-			for (GHRepository repo : ownerContainer.getIndividualRepos()) {
+			for (GHRepository repo : repos) {
 
 				try {
 					ProcessIteratorReturnValue pirv = processRepoEventIterator(repo.listEvents().iterator(),
@@ -196,7 +198,7 @@ public class EventScan {
 			}
 
 			// Next scan the issue events
-			for (GHRepository repo : ownerContainer.getIndividualRepos()) {
+			for (GHRepository repo : repos) {
 
 				ownerName = ownerContainer.getOwner().getName();
 
@@ -207,11 +209,11 @@ public class EventScan {
 
 					result = result == null ? pirv : combine(result, pirv);
 
-				} catch (GHException ghe) {
+				} catch (NoSuchPageException ghe) {
 					// This occurs every so often, and we will rescan the offending repo on the next
 					// pass, so just print it as a single line and move on.
 					System.err.println(
-							"Ignoring GHException - " + ghe.getClass().getSimpleName() + ": " + ghe.getMessage());
+							"Ignoring Exception - " + ghe.getClass().getSimpleName() + ": " + ghe.getMessage());
 				}
 
 			}
@@ -711,6 +713,20 @@ public class EventScan {
 		sb.append(actorLogin);
 
 		return DigestUtils.sha256Hex(sb.toString());
+	}
+
+	private static List<GHRepository> getRandomizedRepositories(GHPerson p) {
+
+		List<GHRepository> result = new ArrayList<>();
+		PagedIterator<GHRepository> it = p.listRepositories().iterator();
+
+		while (it.hasNext()) {
+			result.add(it.next());
+		}
+
+		Collections.shuffle(result);
+
+		return result;
 	}
 
 	/** Container class for return values of event scan */
