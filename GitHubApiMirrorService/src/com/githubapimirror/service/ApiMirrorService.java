@@ -20,6 +20,7 @@ import java.util.Arrays;
 import java.util.List;
 
 import javax.ws.rs.GET;
+import javax.ws.rs.POST;
 import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
 import javax.ws.rs.QueryParam;
@@ -199,6 +200,14 @@ public class ApiMirrorService {
 		Database db = getDb();
 		List<ResourceChangeEventJson> changes = db.getRecentResourceChangeEvents(sinceGreaterOrEqualTime);
 		return Response.ok(JsonUtil.toString(changes)).type(MediaType.APPLICATION_JSON_TYPE).build();
+	}
+
+	@POST
+	@Path("/admin/request/fullscan")
+	public Response adminTriggerFullScan() {
+		ApiMirrorInstance.getInstance().getServerInstance().requestFullScan();
+
+		return Response.ok().build();
 	}
 
 	private void verifyHeaderAuth() {

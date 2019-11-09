@@ -154,4 +154,8 @@ public class ApiMirrorInstance {
 		return presharedKey;
 	}
 
+	public ServerInstance getServerInstance() {
+		return serverInstance;
+	}
+
 }

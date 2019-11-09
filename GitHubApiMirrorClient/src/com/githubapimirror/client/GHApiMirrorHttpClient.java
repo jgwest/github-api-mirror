@@ -163,4 +163,19 @@ public class GHApiMirrorHttpClient {
 		}
 
 	}
+
+	public void adminTriggerFullScan() {
+		try {
+			@SuppressWarnings("unused")
+			ApiResponse<EmptyBody> response = client.post("/admin/request/fullscan", EmptyBody.class);
+
+		} catch (GHApiMirrorClientException e) {
+			throw e;
+		}
+
+	}
+
+	/** HTTP API expects to deserialize an object, so we give it an empty class. */
+	private static class EmptyBody {
+	}
 }

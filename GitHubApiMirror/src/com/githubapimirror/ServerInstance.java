@@ -28,6 +28,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
@@ -339,6 +340,10 @@ public class ServerInstance {
 
 	}
 
+	public void requestFullScan() {
+		backgroundSchedulerThread.requestFullScan();
+	}
+
 	/**
 	 * A single background thread is running at all times, for a single server
 	 * instance. This thread is responsible for retrieving an updated copy of the
@@ -350,6 +355,8 @@ public class ServerInstance {
 		private boolean fullScanInProgress = false;
 
 		private final EventScanData data;
+
+		private final AtomicBoolean fullScanRequested_synch = new AtomicBoolean(false);
 
 		public BackgroundSchedulerThread() {
 			setName(BackgroundSchedulerThread.class.getName());
@@ -413,6 +420,13 @@ public class ServerInstance {
 				}
 			}
 
+			synchronized (fullScanRequested_synch) {
+				if (!fullScanRequired && !fullScanInProgress && fullScanRequested_synch.get()) {
+					fullScanRequired = true;
+					fullScanRequested_synch.set(false);
+				}
+			}
+
 			// Start a full scan if one is needed, and one hasn't already run today
 			if (fullScanRequired && !fullScanInProgress) {
 
@@ -460,6 +474,12 @@ public class ServerInstance {
 
 			}
 
+		}
+
+		public void requestFullScan() {
+			synchronized (fullScanRequested_synch) {
+				fullScanRequested_synch.set(true);
+			}
 		}
 
 	}

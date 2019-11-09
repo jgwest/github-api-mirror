@@ -68,6 +68,28 @@ public class JavaNetHttpClient {
 
 	}
 
+	public <T> ApiResponse<T> post(String apiUrl, Class<T> clazz) {
+
+		ApiResponse<String> body = postRequest(apiUrl);
+
+//		log.out(body.getResponse());
+
+		T parsed = null;
+		ObjectMapper om = new ObjectMapper();
+		try {
+			String response = body.getResponse();
+			if (response.equals("")) {
+				response = "{}";
+			}
+			parsed = om.readValue(response, clazz);
+		} catch (Exception e) {
+			throw GHApiMirrorClientException.createFromThrowable(e);
+		}
+
+		return new ApiResponse<T>(parsed, body.getResponse());
+
+	}
+
 	private ApiResponse<String> getRequest(String requestUrlParam) {
 
 		requestUrlParam = ensureDoesNotBeginsWithSlash(requestUrlParam);
@@ -76,6 +98,33 @@ public class JavaNetHttpClient {
 		HttpURLConnection httpRequest;
 		try {
 			httpRequest = createConnection(this.apiUrl + "/" + requestUrlParam, "GET", presharedKey);
+			final int code = httpRequest.getResponseCode();
+
+			InputStream is = httpRequest.getInputStream();
+
+			body = getBody(is);
+			is.close();
+
+			if (code != 200) {
+				throw new RuntimeException("Request failed - HTTP Code: " + code + "  body: " + body);
+			}
+
+		} catch (IOException e) {
+			throw GHApiMirrorClientException.createFromThrowable(e);
+		}
+
+		return new ApiResponse<String>(body, body);
+
+	}
+
+	private ApiResponse<String> postRequest(String requestUrlParam) {
+
+		requestUrlParam = ensureDoesNotBeginsWithSlash(requestUrlParam);
+
+		String body = null;
+		HttpURLConnection httpRequest;
+		try {
+			httpRequest = createConnection(this.apiUrl + "/" + requestUrlParam, "POST", presharedKey);
 			final int code = httpRequest.getResponseCode();
 
 			InputStream is = httpRequest.getInputStream();
