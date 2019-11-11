@@ -46,6 +46,7 @@ import org.kohsuke.github.GHUser;
 import org.kohsuke.github.GitHub;
 import org.kohsuke.github.PagedIterator;
 
+import com.githubapimirror.ServerInstance.NextEventScanInNanos;
 import com.githubapimirror.WorkQueue.IssueContainer;
 import com.githubapimirror.WorkQueue.OwnerContainer;
 import com.githubapimirror.shared.Owner;
@@ -74,7 +75,8 @@ public class EventScan {
 	private static final GHLog log = GHLog.getInstance();
 
 	public static ProcessIteratorReturnValue doEventScan(OwnerContainer ownerContainer, EventScanData data,
-			WorkQueue workQueue, long lastFullScan, GitHub gitClient, GitHubClient egitClient) throws IOException {
+			WorkQueue workQueue, long lastFullScan, GitHub gitClient, GitHubClient egitClient,
+			NextEventScanInNanos repoNextScan) throws IOException {
 
 		IssueService issueService = new IssueService(egitClient);
 
@@ -92,6 +94,11 @@ public class EventScan {
 		if (ownerContainer.getType() == OwnerContainer.Type.ORG) {
 			GHOrganization org = ownerContainer.getOrg();
 			ownerName = org.getLogin();
+
+			if (!repoNextScan.shouldDoNextEventScan(org)) {
+				return null;
+			}
+
 			repoEventsIterator = org.listEvents().iterator();
 
 			ProcessIteratorReturnValue resultPirv = null;
@@ -106,6 +113,8 @@ public class EventScan {
 				System.err
 						.println("Ignoring GHException - " + ghe.getClass().getSimpleName() + ": " + ghe.getMessage());
 
+				// Short-circuit the rest of the scan, and just return null here.
+				return null;
 			}
 
 			// Next scan the issue events
@@ -121,9 +130,16 @@ public class EventScan {
 					// pass, so just print it as a single line and move on.
 					System.err.println(
 							"Ignoring Exception - " + ghe.getClass().getSimpleName() + ": " + ghe.getMessage());
+
+					// Short-circuit the rest of the repos, and just return null here.
+					return null;
+
 				}
 
 			}
+
+			// On success...
+			repoNextScan.updateNextEventScan(org);
 
 			return resultPirv;
 
@@ -131,6 +147,11 @@ public class EventScan {
 
 			GHUser user = ownerContainer.getUser();
 			ownerName = user.getLogin();
+
+			if (!repoNextScan.shouldDoNextEventScan(user)) {
+				return null;
+			}
+
 			repoEventsIterator = user.listEvents().iterator();
 
 			ProcessIteratorReturnValue resultPirv = null;
@@ -145,6 +166,10 @@ public class EventScan {
 				// pass, so just print it as a single line and move on.
 				System.err
 						.println("Ignoring GHException - " + ghe.getClass().getSimpleName() + ": " + ghe.getMessage());
+
+				// Short-circuit the rest of the scan, and just return null here.
+				return null;
+
 			}
 
 			// Next scan the issue events
@@ -162,15 +187,21 @@ public class EventScan {
 					// pass, so just print it as a single line and move on.
 					System.err.println(
 							"Ignoring Exception - " + ghe.getClass().getSimpleName() + ": " + ghe.getMessage());
+
+					// Short-circuit the rest of the repos, and just return null here.
+					return null;
 				}
 
 			}
 
+			// On success...
+			repoNextScan.updateNextEventScan(user);
+
 			return resultPirv;
 
-			// TODO: Not actually sure this will work for other users.
-
 		} else if (ownerContainer.getType() == OwnerContainer.Type.REPO_LIST) {
+
+			ownerName = ownerContainer.getOwner().getName();
 
 			List<GHRepository> repos = new ArrayList<>(ownerContainer.getIndividualRepos());
 
@@ -178,44 +209,36 @@ public class EventScan {
 
 			ProcessIteratorReturnValue result = null;
 
-			// First scan the repo events
 			for (GHRepository repo : repos) {
 
-				try {
-					ProcessIteratorReturnValue pirv = processRepoEventIterator(repo.listEvents().iterator(),
-							ownerContainer.getOwner(), repo.getName(), data, workQueue, lastFullScan, repoCache,
-							processedIssues);
+				if (repoNextScan.shouldDoNextEventScan(repo)) {
 
-					result = result == null ? pirv : combine(result, pirv);
+					try {
+						// First scan the repo events
+						ProcessIteratorReturnValue pirv = processRepoEventIterator(repo.listEvents().iterator(),
+								ownerContainer.getOwner(), repo.getName(), data, workQueue, lastFullScan, repoCache,
+								processedIssues);
 
-				} catch (GHException ghe) {
-					// This occurs every so often, and we will rescan the offending repo on the next
-					// pass, so just print it as a single line and move on.
-					System.err.println(
-							"Ignoring GHException - " + ghe.getClass().getSimpleName() + ": " + ghe.getMessage());
+						result = combine(result, pirv);
+
+						// Next scan the issue events
+						pirv = processIssueEventList(issueService.pageEvents(ownerName, repo.getName()),
+								ownerContainer.getOwner(), repo.getName(), workQueue, lastFullScan, data, gitClient,
+								egitClient, repoCache, processedIssues);
+
+						result = combine(result, pirv);
+
+						// Success: update the next event scan value.
+						repoNextScan.updateNextEventScan(repo);
+
+					} catch (GHException | NoSuchPageException ghe) {
+						// This occurs every so often, and we will rescan the offending repo on the next
+						// pass, so just print it as a single line and move on.
+						System.err.println(
+								"Ignoring Exception - " + ghe.getClass().getSimpleName() + ": " + ghe.getMessage());
+					}
+
 				}
-
-			}
-
-			// Next scan the issue events
-			for (GHRepository repo : repos) {
-
-				ownerName = ownerContainer.getOwner().getName();
-
-				try {
-					ProcessIteratorReturnValue pirv = processIssueEventList(
-							issueService.pageEvents(ownerName, repo.getName()), Owner.user(ownerName), repo.getName(),
-							workQueue, lastFullScan, data, gitClient, egitClient, repoCache, processedIssues);
-
-					result = result == null ? pirv : combine(result, pirv);
-
-				} catch (NoSuchPageException ghe) {
-					// This occurs every so often, and we will rescan the offending repo on the next
-					// pass, so just print it as a single line and move on.
-					System.err.println(
-							"Ignoring Exception - " + ghe.getClass().getSimpleName() + ": " + ghe.getMessage());
-				}
-
 			}
 
 			return result;
@@ -224,6 +247,7 @@ public class EventScan {
 			throw new RuntimeException("Unrecognized owner type: " + ownerContainer);
 		}
 
+		// Don't put any code here: it won't run because every if branch has a 'return'.
 	}
 
 	private static ProcessIteratorReturnValue combine(ProcessIteratorReturnValue one, ProcessIteratorReturnValue two) {

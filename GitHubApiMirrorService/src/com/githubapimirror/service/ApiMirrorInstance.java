@@ -33,6 +33,7 @@ import com.githubapimirror.ServerInstance;
 import com.githubapimirror.ServerInstance.ServerInstanceBuilder;
 import com.githubapimirror.db.Database;
 import com.githubapimirror.service.yaml.ConfigFileYaml;
+import com.githubapimirror.service.yaml.IndividualRepoListYaml;
 
 /**
  * Only a single instance of a number of objects are maintained in the
@@ -54,25 +55,21 @@ public class ApiMirrorInstance {
 
 			List<String> userReposList = new ArrayList<>();
 			List<String> orgList = new ArrayList<>();
-			List<String> individualReposList = new ArrayList<>();
 
-			ConfigFileYaml sf = mapper.readValue(new FileInputStream(new File(configPath)), ConfigFileYaml.class);
+			ConfigFileYaml configYaml = mapper.readValue(new FileInputStream(new File(configPath)),
+					ConfigFileYaml.class);
 
-			this.presharedKey = sf.getPresharedKey();
+			this.presharedKey = configYaml.getPresharedKey();
 
-			if (sf.getUserRepoList() != null) {
-				userReposList.addAll(sf.getUserRepoList());
+			if (configYaml.getUserRepoList() != null) {
+				userReposList.addAll(configYaml.getUserRepoList());
 			}
 
-			if (sf.getIndividualRepoList() != null) {
-				individualReposList.addAll(sf.getIndividualRepoList());
+			if (configYaml.getOrgList() != null) {
+				orgList.addAll(configYaml.getOrgList());
 			}
 
-			if (sf.getOrgList() != null) {
-				orgList.addAll(sf.getOrgList());
-			}
-
-			String dbPath = sf.getDbPath();
+			String dbPath = configYaml.getDbPath();
 
 			// The database path of the YAML can be override by this JNDI value in the
 			// server.xml. This is used when running within a container.
@@ -82,8 +79,8 @@ public class ApiMirrorInstance {
 			}
 
 			ServerInstanceBuilder builder = ServerInstance.builder()
-					.credentials(sf.getGithubUsername(), sf.getGithubPassword()).dbDir(new File(dbPath))
-					.serverName(sf.getGithubServer());
+					.credentials(configYaml.getGithubUsername(), configYaml.getGithubPassword()).dbDir(new File(dbPath))
+					.serverName(configYaml.getGithubServer());
 
 			if (!orgList.isEmpty()) {
 				builder = builder.orgs(orgList.stream().filter(e -> !e.isEmpty()).collect(Collectors.toList()));
@@ -93,21 +90,24 @@ public class ApiMirrorInstance {
 						.userRepos(userReposList.stream().filter(e -> !e.isEmpty()).collect(Collectors.toList()));
 			}
 
-			if (!individualReposList.isEmpty()) {
-				builder = builder.individualRepos(
-						individualReposList.stream().filter(e -> !e.isEmpty()).collect(Collectors.toList()));
+			if (configYaml.getIndividualRepoList() != null) {
+
+				for (IndividualRepoListYaml irly : configYaml.getIndividualRepoList()) {
+					builder = builder.individualRepos(irly.getRepo(), irly.getTimeBetweenEventScansInSeconds());
+				}
+
 			}
 
-			if (sf.getGithubRateLimit() != null) {
-				builder = builder.numRequestsPerHour(sf.getGithubRateLimit());
+			if (configYaml.getGithubRateLimit() != null) {
+				builder = builder.numRequestsPerHour(configYaml.getGithubRateLimit());
 			}
 
-			if (sf.getTimeBetweenEventScansInSeconds() != null) {
-				builder.timeBetweenEventScansInSeconds(sf.getTimeBetweenEventScansInSeconds());
+			if (configYaml.getTimeBetweenEventScansInSeconds() != null) {
+				builder.timeBetweenEventScansInSeconds(configYaml.getTimeBetweenEventScansInSeconds());
 			}
 
-			if (sf.getPauseBetweenRequestsInMsecs() != null) {
-				builder.pauseBetweenRequestsInMsecs(sf.getPauseBetweenRequestsInMsecs());
+			if (configYaml.getPauseBetweenRequestsInMsecs() != null) {
+				builder.pauseBetweenRequestsInMsecs(configYaml.getPauseBetweenRequestsInMsecs());
 			}
 
 			this.serverInstance = builder.build();
