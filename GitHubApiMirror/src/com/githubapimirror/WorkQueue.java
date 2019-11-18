@@ -228,13 +228,17 @@ public class WorkQueue {
 					double targetRps = (double) (totalLimit) / 3600d;
 
 					long timeToWaitInSeconds = secondsRemaining - (long) ((double) requestsRemaining / targetRps);
-					if (timeToWaitInSeconds < 0) {
+
+					if (((secondsRemaining * 1000) / requestsRemaining) > 900) {
+						timeToWaitInSeconds = 12;
+					} else if (((secondsRemaining * 1000) / requestsRemaining) > 850) {
+						timeToWaitInSeconds = 8;
+					} else if (((secondsRemaining * 1000) / requestsRemaining) > 800) {
+						timeToWaitInSeconds = 4;
+					} else {
 						timeToWaitInSeconds = 0;
-					} else if (timeToWaitInSeconds > 10) {
-						timeToWaitInSeconds = 10;
 					}
 
-					// TODO: Remove this.
 					log.logDebug(
 							"timeToWatchInSeconds in " + this.getClass().getSimpleName() + ": " + timeToWaitInSeconds);
 
