@@ -28,7 +28,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 import org.eclipse.egit.github.core.client.GitHubClient;
@@ -67,8 +67,6 @@ public class ServerInstance {
 
 	private final Database db;
 
-	private final long timeBetweenEventScansInNanos;
-
 	private final BackgroundSchedulerThread backgroundSchedulerThread;
 
 	private final GitHubClient egitClient;
@@ -90,20 +88,19 @@ public class ServerInstance {
 	private final Object rateLimitLock = new Object();
 
 	private ServerInstance(String username, String password, String serverName, List<String> orgNames,
-			List<String> userRepos, List<String> individualRepos, long pauseBetweenRequestsInMsecs, File dbDir,
-			long timeBetweenEventScansInSeconds, GhmFilter filter, int numRequestsPerHour) {
+			List<String> userRepos, List<RepoConstructorEntry> individualRepos, long pauseBetweenRequestsInMsecs,
+			File dbDir, long timeBetweenEventScansInSeconds, GhmFilter filter, int numRequestsPerHour) {
 
 		if (filter == null) {
 			filter = new PermissiveFilter();
 		}
 
-		this.timeBetweenEventScansInNanos = TimeUnit.NANOSECONDS.convert(timeBetweenEventScansInSeconds,
-				TimeUnit.SECONDS);
+		List<String> individualRepoNames = individualRepos.stream().map(e -> e.getRepo()).collect(Collectors.toList());
 
 		// Verify that we don't have both an org, and an individual repo under that org.
 		// eg: asking the server to index both the eclipse org, and the
 		// eclipse/che individual repo.
-		List<String> ownersOfIndividualRepos = individualRepos.stream().map(e -> e.substring(0, e.indexOf("/")))
+		List<String> ownersOfIndividualRepos = individualRepoNames.stream().map(e -> e.substring(0, e.indexOf("/")))
 				.distinct().collect(Collectors.toList());
 		if (ownersOfIndividualRepos.stream().anyMatch(e -> orgNames.contains(e))
 				|| ownersOfIndividualRepos.stream().anyMatch(e -> userRepos.contains(e))) {
@@ -113,12 +110,14 @@ public class ServerInstance {
 
 		db = new InMemoryCacheDb(new PersistJsonDb(dbDir));
 
-		db.uninitializeDatabaseOnContentsMismatch(orgNames, userRepos, individualRepos);
+		db.uninitializeDatabaseOnContentsMismatch(orgNames, userRepos, individualRepoNames);
 
 		queue = new WorkQueue(this, db, numRequestsPerHour, pauseBetweenRequestsInMsecs);
 
 		GitHub githubClient;
 		boolean weSupportRateLimit = false;
+
+		NextEventScanInNanos nextEventScanSettings = new NextEventScanInNanos(timeBetweenEventScansInSeconds);
 
 		try {
 
@@ -182,7 +181,9 @@ public class ServerInstance {
 
 						// Determine if the repo string refers to an org or a user repo, resolve it,
 						// then add it to the individual repo list.
-						for (String fullRepoName : individualRepos) {
+						for (RepoConstructorEntry indivRepoFor : individualRepos) {
+
+							String fullRepoName = indivRepoFor.getRepo();
 							int slashIndex = fullRepoName.indexOf("/");
 							if (slashIndex == -1) {
 								throw new RuntimeException("Invalid repository format: " + fullRepoName);
@@ -215,6 +216,9 @@ public class ServerInstance {
 										"Unable to find user repo or org, after request to GitHub API: "
 												+ fullRepoName);
 							}
+
+							nextEventScanSettings.setTimeBetweenEventScanInSeconds(
+									indivRepoFor.getTimeBetweenEventScansInSeconds().orElse(null), repo);
 
 							RepositoryContainer rc = new RepositoryContainer(owner, repo);
 
@@ -266,7 +270,7 @@ public class ServerInstance {
 			wt.start();
 		}
 
-		backgroundSchedulerThread = new BackgroundSchedulerThread();
+		backgroundSchedulerThread = new BackgroundSchedulerThread(nextEventScanSettings);
 		backgroundSchedulerThread.start();
 
 	}
@@ -339,6 +343,10 @@ public class ServerInstance {
 
 	}
 
+	public void requestFullScan() {
+		backgroundSchedulerThread.requestFullScan();
+	}
+
 	/**
 	 * A single background thread is running at all times, for a single server
 	 * instance. This thread is responsible for retrieving an updated copy of the
@@ -351,10 +359,15 @@ public class ServerInstance {
 
 		private final EventScanData data;
 
-		public BackgroundSchedulerThread() {
+		private final AtomicBoolean fullScanRequested_synch = new AtomicBoolean(false);
+
+		private final NextEventScanInNanos nextEventScanSettings;
+
+		public BackgroundSchedulerThread(NextEventScanInNanos nextEventScanSettings) {
 			setName(BackgroundSchedulerThread.class.getName());
 			setDaemon(true);
 
+			this.nextEventScanSettings = nextEventScanSettings;
 			data = new EventScanData(db.getProcessedEvents());
 		}
 
@@ -362,8 +375,8 @@ public class ServerInstance {
 		 * This method is run every 60 seconds, but event scan is actually
 		 * 'timeBetweenEventScanInNanos'
 		 */
-		private void innerRun(Map<Long /* year * 1000 + day_of_year */, Boolean> hasDailyScanRunToday,
-				AtomicLong nextEventScanInNanos) throws IOException {
+		private void innerRun(Map<Long /* year * 1000 + day_of_year */, Boolean> hasDailyScanRunToday)
+				throws IOException {
 
 			Calendar c = Calendar.getInstance();
 			int hour = c.get(Calendar.HOUR_OF_DAY);
@@ -391,13 +404,17 @@ public class ServerInstance {
 
 			if (!fullScanRequired && queue.availableWork() + queue.activeResources() <= 10) {
 
-				if (System.nanoTime() >= nextEventScanInNanos.get() && !this.fullScanInProgress
-						&& lastFullScan != null) {
+				if (!this.fullScanInProgress && lastFullScan != null) {
 
-					// Perform an event scan on each of the owner containers
+					// Perform an event scan on each of the owner containers, if scheduled.
 					for (OwnerContainer oc : ghOwners) {
 						ProcessIteratorReturnValue retVal = EventScan.doEventScan(oc, data, queue, lastFullScan,
-								githubClientInstance, egitClient);
+								githubClientInstance, egitClient, nextEventScanSettings);
+
+						// Null is returned if a scan wasn't yet scheduled, OR an error occurred.
+						if (retVal == null) {
+							continue;
+						}
 
 						// Event scan can detect that a full scan is required
 						if (retVal.isFullScanRequired() && !fullScanRequired) {
@@ -409,7 +426,14 @@ public class ServerInstance {
 						List<String> newEventHashes = retVal.getNewEventHashes();
 						db.addProcessedEvents(newEventHashes);
 					}
-					nextEventScanInNanos.set(System.nanoTime() + timeBetweenEventScansInNanos);
+
+				}
+			}
+
+			synchronized (fullScanRequested_synch) {
+				if (!fullScanRequired && !fullScanInProgress && fullScanRequested_synch.get()) {
+					fullScanRequired = true;
+					fullScanRequested_synch.set(false);
 				}
 			}
 
@@ -440,8 +464,6 @@ public class ServerInstance {
 		@Override
 		public void run() {
 
-			AtomicLong nextEventScanInNanos = new AtomicLong(0);
-
 			// Whether the daily scan has run today
 			Map<Long /* (year * 1000) + day_of_year */, Boolean /* not used */> hasDailyScanRunToday = new HashMap<>();
 
@@ -450,16 +472,22 @@ public class ServerInstance {
 				log.logDebug("Background thread wake up.");
 
 				try {
-					innerRun(hasDailyScanRunToday, nextEventScanInNanos);
+					innerRun(hasDailyScanRunToday);
 				} catch (Exception e) {
 					// Log and ignore
 					log.logError("Exception occured in " + this.getClass().getSimpleName() + ",", e);
 				}
 
-				GHApiUtil.sleep(60 * 1000);
+				GHApiUtil.sleep(20 * 1000);
 
 			}
 
+		}
+
+		public void requestFullScan() {
+			synchronized (fullScanRequested_synch) {
+				fullScanRequested_synch.set(true);
+			}
 		}
 
 	}
@@ -475,7 +503,7 @@ public class ServerInstance {
 		private String serverName;
 		private List<String> orgNames = new ArrayList<>();
 		private List<String> userRepos = new ArrayList<>();
-		private List<String> individualRepos = new ArrayList<>();
+		private List<RepoConstructorEntry> individualRepos = new ArrayList<>();
 		private File dbDir;
 		private GhmFilter filter;
 
@@ -536,14 +564,10 @@ public class ServerInstance {
 			return this;
 		}
 
-		public ServerInstanceBuilder individualRepos(String... repoList) {
-			this.individualRepos = Arrays.asList(repoList);
+		public ServerInstanceBuilder individualRepos(String repo, Long timeBetweenEventScanInSecondsParam) {
+			this.individualRepos.add(new RepoConstructorEntry(repo, timeBetweenEventScanInSecondsParam));
 			return this;
-		}
 
-		public ServerInstanceBuilder individualRepos(List<String> reposList) {
-			this.individualRepos = reposList;
-			return this;
 		}
 
 		public ServerInstanceBuilder credentials(String username, String password) {
@@ -600,6 +624,161 @@ public class ServerInstance {
 		@Override
 		public boolean processUser(String loginName) {
 			return true;
+		}
+
+	}
+
+	public static class RepoConstructorEntry {
+		String repo;
+		Long timeBetweenEventScansInSeconds = null;
+
+		public RepoConstructorEntry(String repo, Long timeBetweenEventScansInSeconds) {
+			this.repo = repo;
+			this.timeBetweenEventScansInSeconds = timeBetweenEventScansInSeconds;
+		}
+
+		public String getRepo() {
+			return repo;
+		}
+
+		public Optional<Long> getTimeBetweenEventScansInSeconds() {
+			return Optional.ofNullable(timeBetweenEventScansInSeconds);
+		}
+
+	}
+
+	public static class NextEventScanInNanos {
+
+		private final HashMap<String /* org/user name ( + repo name) */, Long> timeBetweenEventScanInNanos_synch = new HashMap<>();
+
+		private final HashMap<String /* org/user name ( + repo name) */, Long> nextEventScanInNanos_synch = new HashMap<>();
+
+		private final long globalTimeBetweenEventScansInNanos;
+
+		public NextEventScanInNanos(long timeBetweenEventScansInSeconds) {
+			this.globalTimeBetweenEventScansInNanos = TimeUnit.NANOSECONDS.convert(timeBetweenEventScansInSeconds,
+					TimeUnit.SECONDS);
+		}
+
+		public void setTimeBetweenEventScanInSeconds(Long secondsParam, GHRepository repo) {
+			String key = repo.getOwnerName() + "/" + repo.getName();
+
+			// TODO: Remove me once debugging is done.
+//			System.out.println("setTimeBetweenEventScanInSeconds -> " + secondsParam + " " + repo.getName());
+
+			long inNanoSeconds;
+
+			if (secondsParam != null) {
+				inNanoSeconds = TimeUnit.NANOSECONDS.convert(secondsParam, TimeUnit.SECONDS);
+			} else {
+				inNanoSeconds = globalTimeBetweenEventScansInNanos;
+			}
+
+			synchronized (timeBetweenEventScanInNanos_synch) {
+
+				timeBetweenEventScanInNanos_synch.put(key, inNanoSeconds);
+
+			}
+		}
+
+		private long timeBetweenEventScanInNanos(GHRepository repo) {
+
+			String key = repo.getOwnerName() + "/" + repo.getName();
+
+			Long timeBetweenEventScanInNanos;
+
+			synchronized (timeBetweenEventScanInNanos_synch) {
+				timeBetweenEventScanInNanos = timeBetweenEventScanInNanos_synch.get(key);
+			}
+
+			if (timeBetweenEventScanInNanos == null) {
+				timeBetweenEventScanInNanos = globalTimeBetweenEventScansInNanos;
+			}
+
+			return timeBetweenEventScanInNanos;
+
+		}
+
+		public boolean shouldDoNextEventScan(GHRepository repo) {
+			return shouldDoNextEventScan(repo.getOwnerName() + "/" + repo.getName());
+		}
+
+		public void updateNextEventScan(GHRepository repo) {
+			if (!shouldDoNextEventScan(repo)) {
+				return;
+			}
+
+			String key = repo.getOwnerName() + "/" + repo.getName();
+
+			synchronized (nextEventScanInNanos_synch) {
+
+				nextEventScanInNanos_synch.put(key, timeBetweenEventScanInNanos(repo) + System.nanoTime());
+			}
+
+		}
+
+		public boolean shouldDoNextEventScan(GHOrganization org) {
+			return shouldDoNextEventScan(org.getLogin());
+		}
+
+		public boolean shouldDoNextEventScan(GHUser user) {
+			return shouldDoNextEventScan(user.getLogin());
+		}
+
+		private boolean shouldDoNextEventScan(String key) {
+
+			Long nextScan;
+			synchronized (nextEventScanInNanos_synch) {
+				nextScan = nextEventScanInNanos_synch.get(key);
+			}
+
+			boolean result;
+
+			if (nextScan == null || nextScan == 0 || System.nanoTime() > nextScan) {
+				result = true;
+			} else {
+				result = false;
+			}
+
+			// TODO: Remove me once debugging is done.
+//			String debugStr = "null";
+//			if (nextScan != null) {
+//				debugStr = "" + TimeUnit.SECONDS.convert(nextScan - System.nanoTime(), TimeUnit.NANOSECONDS);
+//			}
+//
+//			System.out.println(key + " " + result + " (" + debugStr + ")");
+
+			return result;
+
+		}
+
+		public void updateNextEventScan(GHUser user) {
+
+			if (!shouldDoNextEventScan(user)) {
+				return;
+			}
+
+			String key = user.getLogin();
+
+			synchronized (nextEventScanInNanos_synch) {
+
+				nextEventScanInNanos_synch.put(key, globalTimeBetweenEventScansInNanos + System.nanoTime());
+			}
+
+		}
+
+		public void updateNextEventScan(GHOrganization org) {
+			if (!shouldDoNextEventScan(org)) {
+				return;
+			}
+
+			String key = org.getLogin();
+
+			synchronized (nextEventScanInNanos_synch) {
+
+				nextEventScanInNanos_synch.put(key, globalTimeBetweenEventScansInNanos + System.nanoTime());
+			}
+
 		}
 
 	}

@@ -30,7 +30,7 @@ public class ConfigFileYaml {
 
 	private List<String> orgList = new ArrayList<>();
 
-	private List<String> individualRepoList = new ArrayList<>();
+	private List<IndividualRepoListYaml> individualRepoList = new ArrayList<>();
 
 	private String presharedKey;
 
@@ -41,6 +41,9 @@ public class ConfigFileYaml {
 	private Long timeBetweenEventScansInSeconds;
 
 	private Long pauseBetweenRequestsInMsecs;
+
+	public ConfigFileYaml() {
+	}
 
 	public String getGithubServer() {
 		return githubServer;
@@ -74,11 +77,11 @@ public class ConfigFileYaml {
 		this.orgList = orgList;
 	}
 
-	public List<String> getIndividualRepoList() {
+	public List<IndividualRepoListYaml> getIndividualRepoList() {
 		return individualRepoList;
 	}
 
-	public void setIndividualRepoList(List<String> individualRepoList) {
+	public void setIndividualRepoList(List<IndividualRepoListYaml> individualRepoList) {
 		this.individualRepoList = individualRepoList;
 	}
 

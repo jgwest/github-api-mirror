@@ -206,8 +206,14 @@ public class GHRepository {
 					wt.getResults().ifPresent(e -> {
 
 						for (IssueJson jsonIssue : e) {
-							GHIssue issue = new GHIssue(jsonIssue, connInfo);
-							results.add(issue);
+							// Ignore old issues that do not conform to the new JSON
+							try {
+								GHIssue issue = new GHIssue(jsonIssue, connInfo);
+								results.add(issue);
+							} catch (Exception ex) {
+								System.err.println(ex.getClass().getName() + " for " + jsonIssue.getParentRepo() + "/"
+										+ jsonIssue.getNumber());
+							}
 						}
 
 					});

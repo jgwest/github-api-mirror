@@ -14,48 +14,25 @@
  * limitations under the License. 
 */
 
-package com.githubapimirror.client.api;
+package com.githubapimirror.client.api.events;
 
 import java.util.Date;
 
-import com.githubapimirror.shared.json.IssueCommentJson;
+import com.githubapimirror.shared.json.IssueEventJson;
 
-/**
- * This class represents a comment on an issue, received from the GitHub mirror
- * API.
- */
-public class GHIssueComment {
+public abstract class GHIssueEvent {
 
-	private final GHUser user;
+	private final IssueEventJson json;
 
-	private final IssueCommentJson json;
-
-	public GHIssueComment(IssueCommentJson json, GHConnectInfo connInfo) {
-
+	GHIssueEvent(IssueEventJson json) {
 		this.json = json;
-
-		user = connInfo.getUserByLogin(json.getUserLogin());
-
 	}
 
-	public GHUser getUser() {
-		return user;
-	}
-
-	public String getUserLogin() {
-		return json.getUserLogin();
-	}
-
-	public String getBody() {
-		return json.getBody();
+	public String getActorUserLogin() {
+		return json.getActorUserLogin();
 	}
 
 	public Date getCreatedAt() {
 		return json.getCreatedAt();
 	}
-
-	public Date getUpdatedAt() {
-		return json.getUpdatedAt();
-	}
-
 }

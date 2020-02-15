@@ -348,19 +348,21 @@ public class WorkerThread extends Thread {
 					issueEventJson.setCreatedAt(e.getCreatedAt());
 
 					if (e.getEvent().equals(IssueEvent.TYPE_ASSIGNED)
-							| e.getEvent().equals(IssueEvent.TYPE_UNASSIGNED)) {
+							|| e.getEvent().equals(IssueEvent.TYPE_UNASSIGNED)) {
 
 						IssueEventAssignedUnassignedJson ieauj = new IssueEventAssignedUnassignedJson();
 						ieauj.setAssignee(e.getAssignee().getLogin());
 						ieauj.setAssigner(e.getAssigner().getLogin());
+						ieauj.setAssigned(e.getEvent().equals(IssueEvent.TYPE_ASSIGNED));
 						issueEventJson.setData(ieauj);
 						issueEvents.add(issueEventJson);
 
 					} else if (e.getEvent().equals(IssueEvent.TYPE_LABELED)
-							| e.getEvent().equals(IssueEvent.TYPE_UNLABELED)) {
+							|| e.getEvent().equals(IssueEvent.TYPE_UNLABELED)) {
 
 						IssueEventLabeledUnlabeledJson ielj = new IssueEventLabeledUnlabeledJson();
 						ielj.setLabel(e.getLabel().getName());
+						ielj.setLabeled(e.getEvent().equals(IssueEvent.TYPE_LABELED));
 						issueEventJson.setData(ielj);
 						issueEvents.add(issueEventJson);
 

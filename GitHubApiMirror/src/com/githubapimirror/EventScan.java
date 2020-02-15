@@ -20,6 +20,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
@@ -28,6 +29,7 @@ import java.util.regex.Pattern;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.eclipse.egit.github.core.IssueEvent;
 import org.eclipse.egit.github.core.client.GitHubClient;
+import org.eclipse.egit.github.core.client.NoSuchPageException;
 import org.eclipse.egit.github.core.client.PageIterator;
 import org.eclipse.egit.github.core.service.IssueService;
 import org.kohsuke.github.GHEvent;
@@ -35,13 +37,16 @@ import org.kohsuke.github.GHEventInfo;
 import org.kohsuke.github.GHEventPayload;
 import org.kohsuke.github.GHEventPayload.Issue;
 import org.kohsuke.github.GHEventPayload.IssueComment;
+import org.kohsuke.github.GHException;
 import org.kohsuke.github.GHIssue;
 import org.kohsuke.github.GHOrganization;
+import org.kohsuke.github.GHPerson;
 import org.kohsuke.github.GHRepository;
 import org.kohsuke.github.GHUser;
 import org.kohsuke.github.GitHub;
 import org.kohsuke.github.PagedIterator;
 
+import com.githubapimirror.ServerInstance.NextEventScanInNanos;
 import com.githubapimirror.WorkQueue.IssueContainer;
 import com.githubapimirror.WorkQueue.OwnerContainer;
 import com.githubapimirror.shared.Owner;
@@ -70,7 +75,8 @@ public class EventScan {
 	private static final GHLog log = GHLog.getInstance();
 
 	public static ProcessIteratorReturnValue doEventScan(OwnerContainer ownerContainer, EventScanData data,
-			WorkQueue workQueue, long lastFullScan, GitHub gitClient, GitHubClient egitClient) throws IOException {
+			WorkQueue workQueue, long lastFullScan, GitHub gitClient, GitHubClient egitClient,
+			NextEventScanInNanos repoNextScan) throws IOException {
 
 		IssueService issueService = new IssueService(egitClient);
 
@@ -88,24 +94,52 @@ public class EventScan {
 		if (ownerContainer.getType() == OwnerContainer.Type.ORG) {
 			GHOrganization org = ownerContainer.getOrg();
 			ownerName = org.getLogin();
+
+			if (!repoNextScan.shouldDoNextEventScan(org)) {
+				return null;
+			}
+
 			repoEventsIterator = org.listEvents().iterator();
 
+			ProcessIteratorReturnValue resultPirv = null;
+
 			// First scan the repo events
-			ProcessIteratorReturnValue resultPirv = processRepoEventIterator(repoEventsIterator, Owner.org(ownerName),
-					"*", data, workQueue, lastFullScan, repoCache, processedIssues);
+			try {
+				resultPirv = processRepoEventIterator(repoEventsIterator, Owner.org(ownerName), "*", data, workQueue,
+						lastFullScan, repoCache, processedIssues);
+			} catch (GHException ghe) {
+				// This occurs every so often, and we will rescan the offending repo on the next
+				// pass, so just print it as a single line and move on.
+				System.err
+						.println("Ignoring GHException - " + ghe.getClass().getSimpleName() + ": " + ghe.getMessage());
+
+				// Short-circuit the rest of the scan, and just return null here.
+				return null;
+			}
 
 			// Next scan the issue events
-			for (PagedIterator<GHRepository> repoIterator = org.listRepositories().iterator(); repoIterator
-					.hasNext();) {
+			for (GHRepository repo : getRandomizedRepositories(org)) {
+				try {
+					ProcessIteratorReturnValue pirv = processIssueEventList(
+							issueService.pageEvents(ownerName, repo.getName()), Owner.org(ownerName), repo.getName(),
+							workQueue, lastFullScan, data, gitClient, egitClient, repoCache, processedIssues);
 
-				GHRepository repo = repoIterator.next();
+					resultPirv = combine(resultPirv, pirv);
+				} catch (NoSuchPageException ghe) {
+					// This occurs every so often, and we will rescan the offending repo on the next
+					// pass, so just print it as a single line and move on.
+					System.err.println(
+							"Ignoring Exception - " + ghe.getClass().getSimpleName() + ": " + ghe.getMessage());
 
-				ProcessIteratorReturnValue pirv = processIssueEventList(
-						issueService.pageEvents(ownerName, repo.getName()), Owner.org(ownerName), repo.getName(),
-						workQueue, lastFullScan, data, gitClient, egitClient, repoCache, processedIssues);
+					// Short-circuit the rest of the repos, and just return null here.
+					return null;
 
-				resultPirv = combine(resultPirv, pirv);
+				}
+
 			}
+
+			// On success...
+			repoNextScan.updateNextEventScan(org);
 
 			return resultPirv;
 
@@ -113,54 +147,98 @@ public class EventScan {
 
 			GHUser user = ownerContainer.getUser();
 			ownerName = user.getLogin();
+
+			if (!repoNextScan.shouldDoNextEventScan(user)) {
+				return null;
+			}
+
 			repoEventsIterator = user.listEvents().iterator();
 
+			ProcessIteratorReturnValue resultPirv = null;
+
 			// First scan the repo events
-			ProcessIteratorReturnValue resultPirv = processRepoEventIterator(repoEventsIterator, Owner.user(ownerName),
-					"*", data, workQueue, lastFullScan, repoCache, processedIssues);
+			try {
+				resultPirv = processRepoEventIterator(repoEventsIterator, Owner.user(ownerName), "*", data, workQueue,
+						lastFullScan, repoCache, processedIssues);
+
+			} catch (GHException ghe) {
+				// This occurs every so often, and we will rescan the offending repo on the next
+				// pass, so just print it as a single line and move on.
+				System.err
+						.println("Ignoring GHException - " + ghe.getClass().getSimpleName() + ": " + ghe.getMessage());
+
+				// Short-circuit the rest of the scan, and just return null here.
+				return null;
+
+			}
 
 			// Next scan the issue events
-			for (PagedIterator<GHRepository> repoIterator = user.listRepositories().iterator(); repoIterator
-					.hasNext();) {
+			for (GHRepository repo : getRandomizedRepositories(user)) {
 
-				GHRepository repo = repoIterator.next();
+				try {
+					ProcessIteratorReturnValue pirv = processIssueEventList(
+							issueService.pageEvents(ownerName, repo.getName()), Owner.user(ownerName), repo.getName(),
+							workQueue, lastFullScan, data, gitClient, egitClient, repoCache, processedIssues);
 
-				ProcessIteratorReturnValue pirv = processIssueEventList(
-						issueService.pageEvents(ownerName, repo.getName()), Owner.user(ownerName), repo.getName(),
-						workQueue, lastFullScan, data, gitClient, egitClient, repoCache, processedIssues);
+					resultPirv = combine(resultPirv, pirv);
 
-				resultPirv = combine(resultPirv, pirv);
+				} catch (NoSuchPageException ghe) {
+					// This occurs every so often, and we will rescan the offending repo on the next
+					// pass, so just print it as a single line and move on.
+					System.err.println(
+							"Ignoring Exception - " + ghe.getClass().getSimpleName() + ": " + ghe.getMessage());
+
+					// Short-circuit the rest of the repos, and just return null here.
+					return null;
+				}
+
 			}
+
+			// On success...
+			repoNextScan.updateNextEventScan(user);
 
 			return resultPirv;
 
-			// TODO: Not actually sure this will work for other users.
-
 		} else if (ownerContainer.getType() == OwnerContainer.Type.REPO_LIST) {
+
+			ownerName = ownerContainer.getOwner().getName();
+
+			List<GHRepository> repos = new ArrayList<>(ownerContainer.getIndividualRepos());
+
+			Collections.shuffle(repos);
 
 			ProcessIteratorReturnValue result = null;
 
-			// First scan the repo events
-			for (GHRepository repo : ownerContainer.getIndividualRepos()) {
+			for (GHRepository repo : repos) {
 
-				ProcessIteratorReturnValue pirv = processRepoEventIterator(repo.listEvents().iterator(),
-						ownerContainer.getOwner(), repo.getName(), data, workQueue, lastFullScan, repoCache,
-						processedIssues);
+				if (repoNextScan.shouldDoNextEventScan(repo)) {
 
-				result = result == null ? pirv : combine(result, pirv);
+					try {
+						// First scan the repo events
+						ProcessIteratorReturnValue pirv = processRepoEventIterator(repo.listEvents().iterator(),
+								ownerContainer.getOwner(), repo.getName(), data, workQueue, lastFullScan, repoCache,
+								processedIssues);
 
-			}
+						result = combine(result, pirv);
 
-			// Next scan the issue events
-			for (GHRepository repo : ownerContainer.getIndividualRepos()) {
+						// Next scan the issue events
+						pirv = processIssueEventList(issueService.pageEvents(ownerName, repo.getName()),
+								ownerContainer.getOwner(), repo.getName(), workQueue, lastFullScan, data, gitClient,
+								egitClient, repoCache, processedIssues);
 
-				ownerName = ownerContainer.getOwner().getName();
+						result = combine(result, pirv);
 
-				ProcessIteratorReturnValue pirv = processIssueEventList(
-						issueService.pageEvents(ownerName, repo.getName()), Owner.user(ownerName), repo.getName(),
-						workQueue, lastFullScan, data, gitClient, egitClient, repoCache, processedIssues);
+						// Success: update the next event scan value.
+						repoNextScan.updateNextEventScan(repo);
 
-				result = result == null ? pirv : combine(result, pirv);
+					} catch (GHException | NoSuchPageException ghe) {
+						// This occurs every so often, and we will rescan the offending repo on the next
+						// pass, so just print it as a single line and move on.
+						System.err.println(
+								"Ignoring Exception - " + ghe.getClass().getSimpleName() + ": " + ghe.getMessage());
+					}
+
+				}
 			}
 
 			return result;
@@ -169,6 +247,7 @@ public class EventScan {
 			throw new RuntimeException("Unrecognized owner type: " + ownerContainer);
 		}
 
+		// Don't put any code here: it won't run because every if branch has a 'return'.
 	}
 
 	private static ProcessIteratorReturnValue combine(ProcessIteratorReturnValue one, ProcessIteratorReturnValue two) {
@@ -221,8 +300,6 @@ public class EventScan {
 				Date createdAt = ie.getCreatedAt();
 
 				if (createdAt.getTime() < lastFullScan) {
-
-					// TODO: This logic might have issues with events out of order.
 
 					if (fullScanRequired) {
 
@@ -660,6 +737,20 @@ public class EventScan {
 		sb.append(actorLogin);
 
 		return DigestUtils.sha256Hex(sb.toString());
+	}
+
+	private static List<GHRepository> getRandomizedRepositories(GHPerson p) {
+
+		List<GHRepository> result = new ArrayList<>();
+		PagedIterator<GHRepository> it = p.listRepositories().iterator();
+
+		while (it.hasNext()) {
+			result.add(it.next());
+		}
+
+		Collections.shuffle(result);
+
+		return result;
 	}
 
 	/** Container class for return values of event scan */

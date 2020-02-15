@@ -68,6 +68,10 @@ public class GitHub {
 		return connectionInfo.getClient().getResourceChangeEvents(timeGreaterOrEqualInMsecs);
 	}
 
+	public void adminTriggerFullScan() {
+		connectionInfo.getClient().adminTriggerFullScan();
+	}
+
 	public GHConnectInfo getConnectionInfo() {
 		return connectionInfo;
 	}

@@ -14,38 +14,28 @@
  * limitations under the License. 
 */
 
-package com.githubapimirror.shared.json;
+package com.githubapimirror.service.yaml;
 
-import java.util.Map;
+public class IndividualRepoListYaml {
 
-/** JSON Issue event response from the GitHub mirror server. */
-public class IssueEventRenamedJson {
+	private Long timeBetweenEventScansInSeconds;
 
-	String from;
-	String to;
+	private String repo;
 
-	public IssueEventRenamedJson() {
+	public Long getTimeBetweenEventScansInSeconds() {
+		return timeBetweenEventScansInSeconds;
 	}
 
-	public IssueEventRenamedJson(Map<Object, Object> map) {
-		from = (String) map.get("from");
-		to = (String) map.get("to");
+	public void setTimeBetweenEventScansInSeconds(Long timeBetweenEventScansInSeconds) {
+		this.timeBetweenEventScansInSeconds = timeBetweenEventScansInSeconds;
 	}
 
-	public String getFrom() {
-		return from;
+	public String getRepo() {
+		return repo;
 	}
 
-	public void setFrom(String from) {
-		this.from = from;
-	}
-
-	public String getTo() {
-		return to;
-	}
-
-	public void setTo(String to) {
-		this.to = to;
+	public void setRepo(String repo) {
+		this.repo = repo;
 	}
 
 }
