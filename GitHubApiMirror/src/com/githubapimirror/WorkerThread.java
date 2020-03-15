@@ -1,5 +1,5 @@
 /*
- * Copyright 2019 Jonathan West
+ * Copyright 2019, 2020 Jonathan West
  * 
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Date;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.UUID;
@@ -43,6 +44,7 @@ import com.githubapimirror.WorkQueue.IssueContainer;
 import com.githubapimirror.WorkQueue.OwnerContainer;
 import com.githubapimirror.WorkQueue.RepositoryContainer;
 import com.githubapimirror.db.Database;
+import com.githubapimirror.shared.FileLogger;
 import com.githubapimirror.shared.GHApiUtil;
 import com.githubapimirror.shared.JsonUtil;
 import com.githubapimirror.shared.Owner;
@@ -414,6 +416,7 @@ public class WorkerThread extends Thread {
 		// Compare the old version of the database entry, and the current version; if
 		// different, create a change event and add it to the database.
 		if (!JsonUtil.isEqual(oldDbVersion, json, new ObjectMapper())) {
+
 			ResourceChangeEventJson rcej = new ResourceChangeEventJson();
 			rcej.setOwner(issueContainer.getOwner().getName());
 			rcej.setRepo(repoName);
@@ -421,6 +424,14 @@ public class WorkerThread extends Thread {
 			rcej.setUuid(UUID.randomUUID().toString());
 			rcej.setIssueNumber(issueNumber);
 			db.persistResourceChangeEvents(Arrays.asList(rcej));
+
+			ObjectMapper om = new ObjectMapper();
+
+			String jsonValue = om.writeValueAsString(json);
+			FileLogger fl = queue.getServerInstance().getFileLogger();
+			fl.out("resource-change-event: " + new Date() + " " + rcej.getTime() + " " + rcej.getUuid() + " "
+					+ jsonValue);
+
 		}
 	}
 

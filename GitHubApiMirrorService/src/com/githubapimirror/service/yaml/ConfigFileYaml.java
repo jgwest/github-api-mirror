@@ -1,5 +1,5 @@
 /*
- * Copyright 2019 Jonathan West
+ * Copyright 2019, 2020 Jonathan West
  * 
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -41,6 +41,8 @@ public class ConfigFileYaml {
 	private Long timeBetweenEventScansInSeconds;
 
 	private Long pauseBetweenRequestsInMsecs;
+
+	private String fileLoggerPath;
 
 	public ConfigFileYaml() {
 	}
@@ -133,4 +135,11 @@ public class ConfigFileYaml {
 		this.pauseBetweenRequestsInMsecs = pauseBetweenRequestsInMsecs;
 	}
 
+	public String getFileLoggerPath() {
+		return fileLoggerPath;
+	}
+
+	public void setFileLoggerPath(String fileLoggerPath) {
+		this.fileLoggerPath = fileLoggerPath;
+	}
 }
