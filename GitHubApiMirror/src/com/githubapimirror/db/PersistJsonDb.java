@@ -1,5 +1,5 @@
 /*
- * Copyright 2019 Jonathan West
+ * Copyright 2019, 2020 Jonathan West
  * 
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -462,8 +462,10 @@ public class PersistJsonDb implements Database {
 		Optional<String> gitHubContentsHash = getString(KEY_GITHUB_CONTENTS_HASH);
 		if (!gitHubContentsHash.isPresent()) { // key not found
 			uninitializeDatabase = true;
+			log.logInfo("GitHub contents key not found, so uninitializing database.");
 		} else if (!gitHubContentsHash.get().equals(encoded)) {
 			uninitializeDatabase = true; // key doesn't match
+			log.logInfo("GitHub contents key did not match, so uninitializing database.");
 		}
 
 		if (uninitializeDatabase) {
@@ -543,11 +545,21 @@ public class PersistJsonDb implements Database {
 	@Override
 	public void persistResourceChangeEvents(List<ResourceChangeEventJson> newEvents) {
 
+		if (newEvents.size() == 0) {
+			return;
+		}
+
 		File directory = new File(outputDirectory, "events");
 
 		newEvents.stream().filter(e -> e.getTime() <= 0).findAny().ifPresent(e -> {
 			throw new RuntimeException("One or more JSON files was missing a time.");
 		});
+
+		Long timeOfFirstEvent = newEvents.stream().map(e -> e.getTime()).sorted().findFirst().orElse(null);
+
+		if (timeOfFirstEvent == null) {
+			throw new RuntimeException("Time of first event was null: " + newEvents);
+		}
 
 		try {
 			writeLock.lock();
@@ -558,8 +570,9 @@ public class PersistJsonDb implements Database {
 				throw new RuntimeException("Unable to create directory: " + directory);
 			}
 
-			long currTime = System.currentTimeMillis();
-
+			// Prevent collisions when different events occur together within the same
+			// millisecond.
+			long currTime = timeOfFirstEvent;
 			File file;
 			while (true) {
 
@@ -616,8 +629,18 @@ public class PersistJsonDb implements Database {
 
 				if (timestamp >= timestampEqualOrGreater) {
 					try {
-						result.addAll(
-								Arrays.asList(om.readValue(readFromFile(f).get(), ResourceChangeEventJson[].class)));
+
+						// It is possible for the filename timestamp to be larger than the actual
+						// timestamp in the file, so we check that both are >= timestampEqualOrGreater.
+
+						for (ResourceChangeEventJson rcej : om.readValue(readFromFile(f).get(),
+								ResourceChangeEventJson[].class)) {
+
+							if (rcej.getTime() >= timestampEqualOrGreater) {
+								result.add(rcej);
+							}
+
+						}
 					} catch (IOException ex) {
 						throw new RuntimeException(ex);
 					}

@@ -48,8 +48,8 @@ import com.githubapimirror.WorkQueue.RepositoryContainer;
 import com.githubapimirror.db.Database;
 import com.githubapimirror.db.InMemoryCacheDb;
 import com.githubapimirror.db.PersistJsonDb;
-import com.githubapimirror.shared.FileLogger;
 import com.githubapimirror.shared.GHApiUtil;
+import com.githubapimirror.shared.NewFileLogger;
 import com.githubapimirror.shared.Owner;
 
 /**
@@ -88,7 +88,7 @@ public class ServerInstance {
 
 	private final Object rateLimitLock = new Object();
 
-	private final FileLogger fileLogger;
+	private final NewFileLogger fileLogger;
 
 	private ServerInstance(String username, String password, String serverName, List<String> orgNames,
 			List<String> userRepos, List<RepoConstructorEntry> individualRepos, long pauseBetweenRequestsInMsecs,
@@ -99,7 +99,7 @@ public class ServerInstance {
 			filter = new PermissiveFilter();
 		}
 
-		this.fileLogger = new FileLogger(fileLogPath != null ? fileLogPath.toPath() : null);
+		this.fileLogger = new NewFileLogger(fileLogPath != null ? fileLogPath.toPath() : null);
 
 		List<String> individualRepoNames = individualRepos.stream().map(e -> e.getRepo()).collect(Collectors.toList());
 
@@ -293,7 +293,7 @@ public class ServerInstance {
 		return new ServerInstanceBuilder();
 	}
 
-	public FileLogger getFileLogger() {
+	public NewFileLogger getFileLogger() {
 		return fileLogger;
 	}
 

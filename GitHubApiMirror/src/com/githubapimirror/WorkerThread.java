@@ -44,9 +44,9 @@ import com.githubapimirror.WorkQueue.IssueContainer;
 import com.githubapimirror.WorkQueue.OwnerContainer;
 import com.githubapimirror.WorkQueue.RepositoryContainer;
 import com.githubapimirror.db.Database;
-import com.githubapimirror.shared.FileLogger;
 import com.githubapimirror.shared.GHApiUtil;
 import com.githubapimirror.shared.JsonUtil;
+import com.githubapimirror.shared.NewFileLogger;
 import com.githubapimirror.shared.Owner;
 import com.githubapimirror.shared.Owner.Type;
 import com.githubapimirror.shared.json.IssueCommentJson;
@@ -415,7 +415,7 @@ public class WorkerThread extends Thread {
 
 		// Compare the old version of the database entry, and the current version; if
 		// different, create a change event and add it to the database.
-		if (!JsonUtil.isEqual(oldDbVersion, json, new ObjectMapper())) {
+		if (!JsonUtil.isEqualBySortedAlphanumerics(oldDbVersion, json, new ObjectMapper())) {
 
 			ResourceChangeEventJson rcej = new ResourceChangeEventJson();
 			rcej.setOwner(issueContainer.getOwner().getName());
@@ -428,7 +428,7 @@ public class WorkerThread extends Thread {
 			ObjectMapper om = new ObjectMapper();
 
 			String jsonValue = om.writeValueAsString(json);
-			FileLogger fl = queue.getServerInstance().getFileLogger();
+			NewFileLogger fl = queue.getServerInstance().getFileLogger();
 			fl.out("resource-change-event: " + new Date() + " " + rcej.getTime() + " " + rcej.getUuid() + " "
 					+ jsonValue);
 

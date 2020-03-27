@@ -1,5 +1,5 @@
 /*
- * Copyright 2019 Jonathan West
+ * Copyright 2019, 2020 Jonathan West
  * 
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,7 +23,6 @@ import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.githubapimirror.shared.json.IssueJson;
 
 /** JSON utility functions */
 public class JsonUtil {
@@ -50,9 +49,15 @@ public class JsonUtil {
 
 	}
 
-	public static boolean isEqual(IssueJson one, IssueJson two, ObjectMapper om) throws JsonProcessingException {
+	/**
+	 * Serialize one and two into JSON objects, split each into component
+	 * alphanumeric characters, sort them by characters, and then compare the
+	 * result.
+	 */
+	public static boolean isEqualBySortedAlphanumerics(Object one, Object two, ObjectMapper om)
+			throws JsonProcessingException {
 
-		List<String> issues = Arrays.asList(one, two).stream().map(e -> {
+		List<String> jsonStrings = Arrays.asList(one, two).stream().map(e -> {
 			try {
 				if (e == null) {
 					return "";
@@ -75,7 +80,7 @@ public class JsonUtil {
 
 		}).collect(Collectors.toList());
 
-		return issues.get(0).equals(issues.get(1));
+		return jsonStrings.get(0).equals(jsonStrings.get(1));
 
 	}
 

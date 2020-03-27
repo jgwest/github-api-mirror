@@ -1,5 +1,5 @@
 /*
- * Copyright 2019 Jonathan West
+ * Copyright 2019, 2020 Jonathan West
  * 
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -194,7 +194,7 @@ public class ApiMirrorService {
 
 	@GET
 	@Path("/resourceChangeEvent")
-	public Response getUser(@QueryParam("since") long sinceGreaterOrEqualTime) {
+	public Response getRecentResourceChangeEvents(@QueryParam("since") long sinceGreaterOrEqualTime) {
 		verifyHeaderAuth();
 
 		Database db = getDb();
