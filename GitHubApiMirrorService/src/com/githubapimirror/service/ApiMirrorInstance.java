@@ -103,11 +103,15 @@ public class ApiMirrorInstance {
 			}
 
 			if (configYaml.getTimeBetweenEventScansInSeconds() != null) {
-				builder.timeBetweenEventScansInSeconds(configYaml.getTimeBetweenEventScansInSeconds());
+				builder = builder.timeBetweenEventScansInSeconds(configYaml.getTimeBetweenEventScansInSeconds());
 			}
 
 			if (configYaml.getPauseBetweenRequestsInMsecs() != null) {
-				builder.pauseBetweenRequestsInMsecs(configYaml.getPauseBetweenRequestsInMsecs());
+				builder = builder.pauseBetweenRequestsInMsecs(configYaml.getPauseBetweenRequestsInMsecs());
+			}
+
+			if (configYaml.getFileLoggerPath() != null) {
+				builder = builder.fileLoggingPath(new File(configYaml.getFileLoggerPath()));
 			}
 
 			this.serverInstance = builder.build();

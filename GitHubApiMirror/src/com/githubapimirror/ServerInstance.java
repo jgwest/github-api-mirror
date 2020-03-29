@@ -1,5 +1,5 @@
 /*
- * Copyright 2019 Jonathan West
+ * Copyright 2019, 2020 Jonathan West
  * 
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -49,6 +49,7 @@ import com.githubapimirror.db.Database;
 import com.githubapimirror.db.InMemoryCacheDb;
 import com.githubapimirror.db.PersistJsonDb;
 import com.githubapimirror.shared.GHApiUtil;
+import com.githubapimirror.shared.NewFileLogger;
 import com.githubapimirror.shared.Owner;
 
 /**
@@ -87,13 +88,18 @@ public class ServerInstance {
 
 	private final Object rateLimitLock = new Object();
 
+	private final NewFileLogger fileLogger;
+
 	private ServerInstance(String username, String password, String serverName, List<String> orgNames,
 			List<String> userRepos, List<RepoConstructorEntry> individualRepos, long pauseBetweenRequestsInMsecs,
-			File dbDir, long timeBetweenEventScansInSeconds, GhmFilter filter, int numRequestsPerHour) {
+			File dbDir, long timeBetweenEventScansInSeconds, GhmFilter filter, int numRequestsPerHour,
+			File fileLogPath) {
 
 		if (filter == null) {
 			filter = new PermissiveFilter();
 		}
+
+		this.fileLogger = new NewFileLogger(fileLogPath != null ? fileLogPath.toPath() : null);
 
 		List<String> individualRepoNames = individualRepos.stream().map(e -> e.getRepo()).collect(Collectors.toList());
 
@@ -285,6 +291,10 @@ public class ServerInstance {
 
 	public static ServerInstanceBuilder builder() {
 		return new ServerInstanceBuilder();
+	}
+
+	public NewFileLogger getFileLogger() {
+		return fileLogger;
 	}
 
 	/**
@@ -507,6 +517,8 @@ public class ServerInstance {
 		private File dbDir;
 		private GhmFilter filter;
 
+		private File fileLoggingPath;
+
 		private long timeBetweenEventScansInSeconds = TimeUnit.SECONDS.convert(10, TimeUnit.MINUTES);
 
 		private long pauseBetweenRequestsInMsecs = 500;
@@ -591,9 +603,15 @@ public class ServerInstance {
 			return this;
 		}
 
+		public ServerInstanceBuilder fileLoggingPath(File fileLoggingPath) {
+			this.fileLoggingPath = fileLoggingPath;
+			return this;
+		}
+
 		public ServerInstance build() {
 			return new ServerInstance(username, password, serverName, orgNames, userRepos, individualRepos,
-					pauseBetweenRequestsInMsecs, dbDir, timeBetweenEventScansInSeconds, filter, numRequestsPerHour);
+					pauseBetweenRequestsInMsecs, dbDir, timeBetweenEventScansInSeconds, filter, numRequestsPerHour,
+					fileLoggingPath);
 		}
 
 	}
