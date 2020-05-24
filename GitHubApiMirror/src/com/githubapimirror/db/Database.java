@@ -1,5 +1,5 @@
 /*
- * Copyright 2019 Jonathan West
+ * Copyright 2019, 2020 Jonathan West
  * 
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,7 +36,8 @@ import com.githubapimirror.shared.json.UserRepositoriesJson;
  */
 public interface Database {
 
-	public static final String LAST_FULL_SCAN = "lastFullScan";
+	/** The time at which the last full scan started (not completed). */
+	public static final String LAST_FULL_SCAN_START = "lastFullScan";
 
 	public Optional<IssueJson> getIssue(Owner owner, String repoName, long issueNumber);
 

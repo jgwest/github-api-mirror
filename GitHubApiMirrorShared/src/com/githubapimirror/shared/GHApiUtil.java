@@ -1,5 +1,5 @@
 /*
- * Copyright 2019 Jonathan West
+ * Copyright 2019, 2020 Jonathan West
  * 
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,7 +23,11 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.Map.Entry;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -125,6 +129,44 @@ public class GHApiUtil {
 		}
 
 		throw lastThrowable;
+	}
+
+	public static String getAllThreadStacktraces() {
+
+		String CRLF = System.getProperty("line.separator");
+
+		Map<Thread, StackTraceElement[]> threads = Thread.getAllStackTraces();
+
+		List<Map.Entry<Thread, StackTraceElement[]>> threadList = new ArrayList<>();
+		threadList.addAll(threads.entrySet());
+
+		Collections.sort(threadList, new Comparator<Map.Entry<Thread, StackTraceElement[]>>() {
+
+			@Override
+			public int compare(Entry<Thread, StackTraceElement[]> o1, Entry<Thread, StackTraceElement[]> o2) {
+				return (int) (o1.getKey().getId() - o2.getKey().getId());
+			}
+
+		});
+
+		StringBuilder sb = new StringBuilder();
+
+		threadList.forEach((e) -> {
+			Thread t = e.getKey();
+			StackTraceElement[] stes = e.getValue();
+
+			sb.append("- Thread " + t.getId() + " [" + t.getName() + "]: " + CRLF);
+			if (stes.length > 0) {
+				for (StackTraceElement ste : stes) {
+					sb.append("    " + ste + CRLF);
+				}
+			} else {
+				sb.append("    None." + CRLF);
+			}
+			sb.append("" + CRLF);
+		});
+
+		return sb.toString();
 	}
 
 }
