@@ -393,33 +393,47 @@ public class ServerInstance {
 			int dayOfYear = c.get(Calendar.DAY_OF_YEAR);
 			int year = c.get(Calendar.YEAR);
 
-			Long lastFullScan = db.getLong(Database.LAST_FULL_SCAN).orElse(null);
+			Long lastFullScanStart = db.getLong(Database.LAST_FULL_SCAN_START).orElse(null);
 
 			if (queue.availableWork() == 0 && queue.activeResources() == 0 && this.fullScanInProgress) {
 				// A full scan is considered completed if it starts, and then the available work
 				// dropped to 0.
 
 				this.fullScanInProgress = false;
-				lastFullScan = System.currentTimeMillis();
-				db.persistLong(Database.LAST_FULL_SCAN, lastFullScan);
-				db.clearProcessedEvents();
-
-				data.clear();
 
 				log.logInfo("Full scan was detected as complete.");
 
 			}
 
-			boolean fullScanRequired = (hour == 3 || !getDb().isDatabaseInitialized() || lastFullScan == null);
+			boolean fullScanRequired = (hour == 3 || !getDb().isDatabaseInitialized() || lastFullScanStart == null);
 
 			if (!fullScanRequired && queue.availableWork() + queue.activeResources() <= 10) {
 
-				if (!this.fullScanInProgress && lastFullScan != null) {
+				if (!this.fullScanInProgress && lastFullScanStart != null) {
+
+					long finalLastFullScan = lastFullScanStart;
 
 					// Perform an event scan on each of the owner containers, if scheduled.
 					for (OwnerContainer oc : ghOwners) {
-						ProcessIteratorReturnValue retVal = EventScan.doEventScan(oc, data, queue, lastFullScan,
-								githubClientInstance, egitClient, nextEventScanSettings);
+
+						HeartbeatThreadRunner<ProcessIteratorReturnValue> htr = new HeartbeatThreadRunner<ProcessIteratorReturnValue>(
+								(threadRunnerRef) -> {
+									return EventScan.doEventScan(oc, data, queue, finalLastFullScan,
+											githubClientInstance, egitClient, nextEventScanSettings, threadRunnerRef);
+								});
+
+						ProcessIteratorReturnValue retVal;
+						try {
+							retVal = htr.run().orElse(null);
+						} catch (Exception e) {
+							if (e instanceof IOException) {
+								throw (IOException) e;
+							} else if (e instanceof RuntimeException) {
+								throw (RuntimeException) e;
+							} else {
+								throw new RuntimeException(e);
+							}
+						}
 
 						// Null is returned if a scan wasn't yet scheduled, OR an error occurred.
 						if (retVal == null) {
@@ -461,6 +475,10 @@ public class ServerInstance {
 					log.logInfo("Beginning full scan.");
 
 					this.fullScanInProgress = true;
+
+					db.persistLong(Database.LAST_FULL_SCAN_START, System.currentTimeMillis());
+					db.clearProcessedEvents();
+					data.clear();
 
 					ghOwners.forEach(e -> {
 						queue.addOwner(e);

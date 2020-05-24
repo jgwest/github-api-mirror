@@ -22,7 +22,6 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Date;
 import java.util.List;
-import java.util.NoSuchElementException;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -168,11 +167,12 @@ public class WorkerThread extends Thread {
 	}
 
 	private static void printException(Exception e) {
-		String exStr = e.getClass().getName() + ": " + e.getMessage();
-		if (e instanceof NoSuchElementException) {
-			e.printStackTrace();
-		}
-		System.err.println(exStr);
+		e.printStackTrace();
+//		String exStr = e.getClass().getName() + ": " + e.getMessage();
+//		if (e instanceof NoSuchElementException) {
+//			e.printStackTrace();
+//		}
+//		System.err.println(exStr);
 	}
 
 	public void setAcceptingNewWork(boolean acceptingNewWork) {
@@ -235,6 +235,10 @@ public class WorkerThread extends Thread {
 
 	private void processUser(GHUser user, Database db) throws IOException {
 
+		if (user == null || user.getLogin() == null) {
+			return;
+		}
+
 		String login = user.getLogin();
 
 		if (filter != null && !filter.processUser(login)) {
@@ -274,10 +278,12 @@ public class WorkerThread extends Thread {
 
 		GHUser reporter = issue.getUser();
 
-		String reporterLogin = reporter.getLogin();
+		String reporterLogin = sanitizeUserLogin(reporter);
 
 		if (filter == null || filter.processUser(reporterLogin)) {
-			queue.addUser(reporter);
+			if (reporter != null) {
+				queue.addUser(reporter);
+			}
 		}
 
 		json.setClosed(issue.getState() == GHIssueState.CLOSED);
@@ -298,6 +304,9 @@ public class WorkerThread extends Thread {
 
 		issue.getAssignees().forEach(user -> {
 			String login = user.getLogin();
+			if (login == null) {
+				return;
+			}
 
 			assignees.add(login);
 
@@ -321,7 +330,7 @@ public class WorkerThread extends Thread {
 			commentJson.setBody(comment.getBody());
 			commentJson.setCreatedAt(comment.getCreatedAt());
 			commentJson.setUpdatedAt(comment.getUpdatedAt());
-			commentJson.setUserLogin(comment.getUser().getLogin());
+			commentJson.setUserLogin(sanitizeUserLogin(comment.getUser()));
 
 			json.getComments().add(commentJson);
 		}
@@ -344,7 +353,8 @@ public class WorkerThread extends Thread {
 
 					IssueEventJson issueEventJson = new IssueEventJson();
 
-					String userLogin = e.getActor().getLogin();
+					String userLogin = sanitizeUserLogin(e.getActor());
+
 					issueEventJson.setActorUserLogin(userLogin);
 					issueEventJson.setType(e.getEvent());
 					issueEventJson.setCreatedAt(e.getCreatedAt());
@@ -353,8 +363,8 @@ public class WorkerThread extends Thread {
 							|| e.getEvent().equals(IssueEvent.TYPE_UNASSIGNED)) {
 
 						IssueEventAssignedUnassignedJson ieauj = new IssueEventAssignedUnassignedJson();
-						ieauj.setAssignee(e.getAssignee().getLogin());
-						ieauj.setAssigner(e.getAssigner().getLogin());
+						ieauj.setAssignee(sanitizeUserLogin(e.getAssignee()));
+						ieauj.setAssigner(sanitizeUserLogin(e.getAssigner()));
 						ieauj.setAssigned(e.getEvent().equals(IssueEvent.TYPE_ASSIGNED));
 						issueEventJson.setData(ieauj);
 						issueEvents.add(issueEventJson);
@@ -490,6 +500,32 @@ public class WorkerThread extends Thread {
 		}
 
 		db.persistRepository(json);
+	}
+
+	private static String sanitizeUserLogin(GHUser u) {
+		if (u == null) {
+			return "Ghost";
+		}
+
+		String userLogin = u.getLogin();
+		if (userLogin == null) {
+			userLogin = "Ghost";
+		}
+
+		return userLogin;
+	}
+
+	private static String sanitizeUserLogin(org.eclipse.egit.github.core.User u) {
+		if (u == null) {
+			return "Ghost";
+		}
+
+		String userLogin = u.getLogin();
+		if (userLogin == null) {
+			userLogin = "Ghost";
+		}
+
+		return userLogin;
 	}
 
 	/**

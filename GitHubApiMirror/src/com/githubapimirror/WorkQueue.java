@@ -129,6 +129,10 @@ public class WorkQueue {
 	}
 
 	public void addUser(GHUser user) {
+		if (user == null || user.getLogin() == null) {
+			return;
+		}
+
 		synchronized (lock) {
 			if (!usersToProcess_synch_lock.contains(user) && !acquiredUsers_synch_lock.containsKey(user.getLogin())) {
 				usersToProcess_synch_lock.add(user);
@@ -139,6 +143,11 @@ public class WorkQueue {
 	}
 
 	public void addUserRetry(GHUser user) {
+
+		if (user == null || user.getLogin() == null) {
+			return;
+		}
+
 		// Unlike addUser(), this method ignores whether the user is in acquiredUsers
 		synchronized (lock) {
 			if (!usersToProcess_synch_lock.contains(user)) {
