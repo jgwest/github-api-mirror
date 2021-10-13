@@ -198,8 +198,13 @@ public class ServerInstance {
 							String ownerName = fullRepoName.substring(0, slashIndex);
 							String repoName = fullRepoName.substring(slashIndex + 1);
 
+							GHOrganization org = null;
 							GHUser user = null;
-							GHOrganization org = githubClient.getOrganization(ownerName);
+							try {
+								org = githubClient.getOrganization(ownerName);
+							} catch (Exception e) {
+								// Ignore; will try retrieving it as a user, next.
+							}
 							if (org == null) {
 								user = githubClient.getUser(ownerName);
 								if (user == null) {
@@ -271,7 +276,7 @@ public class ServerInstance {
 
 		this.supportsRateLimit = weSupportRateLimit;
 
-		for (int x = 0; x < 5; x++) {
+		for (int x = 0; x < 1; x++) { // TODO: Put this back to 5
 			WorkerThread wt = new WorkerThread(queue, filter);
 			wt.start();
 		}
@@ -584,16 +589,19 @@ public class ServerInstance {
 			return this;
 		}
 
+		// The user equivalent to organization, eg https://github.com/jgwest
 		public ServerInstanceBuilder userRepos(String... userList) {
 			this.userRepos = Arrays.asList(userList);
 			return this;
 		}
-
+		
+		// The user equivalent to organization, eg https://github.com/jgwest
 		public ServerInstanceBuilder userRepos(List<String> userReposList) {
 			this.userRepos = userReposList;
 			return this;
 		}
 
+		// 'repo' should be in the form of '(owner name)/repository name'
 		public ServerInstanceBuilder individualRepos(String repo, Long timeBetweenEventScanInSecondsParam) {
 			this.individualRepos.add(new RepoConstructorEntry(repo, timeBetweenEventScanInSecondsParam));
 			return this;

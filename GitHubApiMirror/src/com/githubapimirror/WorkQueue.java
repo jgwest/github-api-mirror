@@ -83,6 +83,8 @@ public class WorkQueue {
 	}
 
 	public void addOwner(OwnerContainer oc) {
+		log.logDebug("Adding owner to work queue: " + oc);
+
 		synchronized (lock) {
 			if (!ownersToProcess_synch_lock.contains(oc)) {
 				ownersToProcess_synch_lock.add(oc);
@@ -92,6 +94,7 @@ public class WorkQueue {
 	}
 
 	public void addRepository(Owner owner, GHRepository repository) {
+		log.logDebug("Adding repository to work queue: " + owner + " " + repository.getFullName());
 
 		RepositoryContainer rc = new RepositoryContainer(owner, repository);
 

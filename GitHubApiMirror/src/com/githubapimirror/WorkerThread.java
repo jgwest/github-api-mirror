@@ -33,6 +33,7 @@ import org.eclipse.egit.github.core.client.PageIterator;
 import org.eclipse.egit.github.core.service.IssueService;
 import org.kohsuke.github.GHIssue;
 import org.kohsuke.github.GHIssueComment;
+import org.kohsuke.github.GHIssueRename;
 import org.kohsuke.github.GHIssueState;
 import org.kohsuke.github.GHOrganization;
 import org.kohsuke.github.GHRepository;
@@ -80,6 +81,8 @@ public class WorkerThread extends Thread {
 
 	private boolean acceptingNewWork = true;
 
+	private static final boolean USE_OLD_EGIT_IMPL = false;
+
 	public WorkerThread(WorkQueue queue, GhmFilter filter) {
 		setName(WorkerThread.class.getName());
 		this.queue = queue;
@@ -95,7 +98,12 @@ public class WorkerThread extends Thread {
 		final Database db = queue.getDb();
 
 		while (acceptingNewWork) {
+
+			log.logDebug("Waiting for available work");
+
 			queue.waitForAvailableWork();
+
+			log.logDebug("Retrieving available work");
 
 			OwnerContainer ownerContainer = queue.pollOwner().orElse(null);
 			if (ownerContainer != null) {
@@ -110,7 +118,6 @@ public class WorkerThread extends Thread {
 					queue.markAsProcessed(ownerContainer);
 				}
 				continue;
-
 			}
 
 			RepositoryContainer repo = queue.pollRepository().orElse(null);
@@ -338,18 +345,12 @@ public class WorkerThread extends Thread {
 		// Acquire issue events, add them to the JSON
 		if (filter == null || filter.processIssueEvents(issueContainer.getOwner(), repoName, issue.getNumber())) {
 
-			GitHubClient client = queue.getServerInstance().getEgitClient();
 
-			IssueService service = new IssueService(client);
+			if (!USE_OLD_EGIT_IMPL) {
 
-			List<IssueEventJson> issueEvents = json.getIssueEvents();
-
-			for (PageIterator<IssueEvent> it = service.pageIssueEvents(issueContainer.getOwner().getName(), repoName,
-					issueNumber); it.hasNext();) {
-
-				Collection<IssueEvent> c = it.next();
-
-				for (IssueEvent e : c) {
+				List<IssueEventJson> issueEvents = json.getIssueEvents();
+				
+				issue.listEvents().forEach(e -> {
 
 					IssueEventJson issueEventJson = new IssueEventJson();
 
@@ -364,7 +365,7 @@ public class WorkerThread extends Thread {
 
 						IssueEventAssignedUnassignedJson ieauj = new IssueEventAssignedUnassignedJson();
 						ieauj.setAssignee(sanitizeUserLogin(e.getAssignee()));
-						ieauj.setAssigner(sanitizeUserLogin(e.getAssigner()));
+						ieauj.setAssigner(sanitizeUserLogin(e.getActor()));
 						ieauj.setAssigned(e.getEvent().equals(IssueEvent.TYPE_ASSIGNED));
 						issueEventJson.setData(ieauj);
 						issueEvents.add(issueEventJson);
@@ -380,7 +381,7 @@ public class WorkerThread extends Thread {
 
 					} else if (e.getEvent().equals(IssueEvent.TYPE_RENAMED)) {
 
-						Rename rename = e.getRename();
+						GHIssueRename rename = e.getRename();
 						IssueEventRenamedJson renamed = new IssueEventRenamedJson();
 						renamed.setFrom(rename.getFrom());
 						renamed.setTo(rename.getTo());
@@ -394,6 +395,69 @@ public class WorkerThread extends Thread {
 					} else if (e.getEvent().equals(IssueEvent.TYPE_CLOSED)) {
 						issueEvents.add(issueEventJson);
 					}
+					
+				});
+
+				
+			} else {
+				GitHubClient client = queue.getServerInstance().getEgitClient();
+
+				IssueService service = new IssueService(client);
+
+				List<IssueEventJson> issueEvents = json.getIssueEvents();
+
+				for (PageIterator<IssueEvent> it = service.pageIssueEvents(issueContainer.getOwner().getName(),
+						repoName, issueNumber); it.hasNext();) {
+
+					Collection<IssueEvent> c = it.next();
+
+					for (IssueEvent e : c) {
+
+						IssueEventJson issueEventJson = new IssueEventJson();
+
+						String userLogin = sanitizeUserLogin(e.getActor());
+
+						issueEventJson.setActorUserLogin(userLogin);
+						issueEventJson.setType(e.getEvent());
+						issueEventJson.setCreatedAt(e.getCreatedAt());
+
+						if (e.getEvent().equals(IssueEvent.TYPE_ASSIGNED)
+								|| e.getEvent().equals(IssueEvent.TYPE_UNASSIGNED)) {
+
+							IssueEventAssignedUnassignedJson ieauj = new IssueEventAssignedUnassignedJson();
+							ieauj.setAssignee(sanitizeUserLogin(e.getAssignee()));
+							ieauj.setAssigner(sanitizeUserLogin(e.getAssigner()));
+							ieauj.setAssigned(e.getEvent().equals(IssueEvent.TYPE_ASSIGNED));
+							issueEventJson.setData(ieauj);
+							issueEvents.add(issueEventJson);
+
+						} else if (e.getEvent().equals(IssueEvent.TYPE_LABELED)
+								|| e.getEvent().equals(IssueEvent.TYPE_UNLABELED)) {
+
+							IssueEventLabeledUnlabeledJson ielj = new IssueEventLabeledUnlabeledJson();
+							ielj.setLabel(e.getLabel().getName());
+							ielj.setLabeled(e.getEvent().equals(IssueEvent.TYPE_LABELED));
+							issueEventJson.setData(ielj);
+							issueEvents.add(issueEventJson);
+
+						} else if (e.getEvent().equals(IssueEvent.TYPE_RENAMED)) {
+
+							Rename rename = e.getRename();
+							IssueEventRenamedJson renamed = new IssueEventRenamedJson();
+							renamed.setFrom(rename.getFrom());
+							renamed.setTo(rename.getTo());
+							issueEventJson.setData(renamed);
+							issueEvents.add(issueEventJson);
+
+						} else if (e.getEvent().equals(IssueEvent.TYPE_REOPENED)) {
+							issueEvents.add(issueEventJson);
+						} else if (e.getEvent().equals(IssueEvent.TYPE_MERGED)) {
+							issueEvents.add(issueEventJson);
+						} else if (e.getEvent().equals(IssueEvent.TYPE_CLOSED)) {
+							issueEvents.add(issueEventJson);
+						}
+					}
+
 				}
 
 			}

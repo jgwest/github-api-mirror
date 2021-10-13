@@ -165,4 +165,12 @@ public class IssueJson {
 		this.isClosed = isClosed;
 	}
 
+	@Override
+	public String toString() {
+		return "IssueJson [parentRepo=" + parentRepo + ", createdAt=" + createdAt + ", closedAt=" + closedAt
+				+ ", labels=" + labels + ", assignees=" + assignees + ", title=" + title + ", htmlUrl=" + htmlUrl
+				+ ", number=" + number + ", body=" + body + ", isPullRequest=" + isPullRequest + ", isClosed="
+				+ isClosed + ", comments=" + comments + ", reporter=" + reporter + ", issueEvents=" + issueEvents + "]";
+	}
+	
 }

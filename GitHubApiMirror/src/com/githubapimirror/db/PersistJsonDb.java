@@ -417,6 +417,10 @@ public class PersistJsonDb implements Database {
 		if (individualRepos == null) {
 			individualRepos = new ArrayList<>();
 		}
+		
+		orgs = new ArrayList<>(orgs);
+		userRepos= new ArrayList<>(userRepos);
+		individualRepos = new ArrayList<>(individualRepos);
 
 		// Convert to lowercase and sort
 		Arrays.asList(orgs, userRepos, individualRepos).stream().forEach(e -> {

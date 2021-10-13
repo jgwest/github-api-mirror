@@ -61,4 +61,10 @@ public class IssueEventJson {
 		this.data = data;
 	}
 
+	@Override
+	public String toString() {
+		return "IssueEventJson [type=" + type + ", createdAt=" + createdAt + ", actorUserLogin=" + actorUserLogin
+				+ ", data=" + data + "]";
+	}
+
 }
