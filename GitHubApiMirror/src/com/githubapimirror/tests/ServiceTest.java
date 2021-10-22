@@ -116,4 +116,46 @@ public class ServiceTest extends AbstractTest {
 
 	}
 
+	@Test
+	public void testIssueEvents() throws IOException {
+
+		File dirDb = Files.createTempDirectory("gham").toFile();
+
+		String orgName = "argoproj-labs";
+		String repoName = "applicationset";
+
+		TestFilter tf = new TestFilter();
+		tf.addTestPair(new TestFilter.TFTestPair(Owner.org(orgName), repoName, 222, true));
+
+		ServerInstanceBuilder builder = getClientBuilder();
+
+		ServerInstance instance = builder.serverName("github.com").individualRepos(orgName + "/" + repoName, 3600l)
+				.dbDir(dirDb).filter(tf).numRequestsPerHour(100_000).build();
+
+		waitForPass(60, false, () -> {
+
+			Database db = instance.getDb();
+
+			Owner owner = Owner.org(orgName);
+
+			OrganizationJson oj = db.getOrganization(orgName).get();
+			assertTrue(oj.getRepositories().contains(repoName));
+
+			RepositoryJson rj = db.getRepository(owner, repoName).get();
+			assertNotNull(rj);
+
+			IssueJson ij = db.getIssue(owner, repoName, 222).get();
+
+			assertTrue(ij.getIssueEvents().size() > 0);
+
+			assertTrue(ij.getIssueEvents().stream()
+					.anyMatch(ie -> ie.getActorUserLogin().equals("jgwest") && ie.getType().equals("labeled")));
+
+			assertTrue(ij.getIssueEvents().stream()
+					.anyMatch(ie -> ie.getActorUserLogin().equals("chetan-rns") && ie.getType().equals("assigned")));
+			
+		});
+
+	}
+
 }
