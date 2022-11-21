@@ -39,11 +39,13 @@ import org.kohsuke.github.GHEventPayload.Issue;
 import org.kohsuke.github.GHEventPayload.IssueComment;
 import org.kohsuke.github.GHException;
 import org.kohsuke.github.GHIssue;
+import org.kohsuke.github.GHIssueEvent;
 import org.kohsuke.github.GHOrganization;
 import org.kohsuke.github.GHPerson;
 import org.kohsuke.github.GHRepository;
 import org.kohsuke.github.GHUser;
 import org.kohsuke.github.GitHub;
+import org.kohsuke.github.PagedIterable;
 import org.kohsuke.github.PagedIterator;
 
 import com.githubapimirror.ServerInstance.NextEventScanInNanos;
@@ -120,11 +122,12 @@ public class EventScan {
 
 			// Next scan the issue events
 			for (GHRepository repo : getRandomizedRepositories(org)) {
+
+				PagedIterable<GHIssueEvent> repoIssueEvents = repo.listIssueEvents();
 				try {
-					ProcessIteratorReturnValue pirv = processIssueEventList(
-							issueService.pageEvents(ownerName, repo.getName()), Owner.org(ownerName), repo.getName(),
-							workQueue, lastFullScanStart, data, gitClient, egitClient, repoCache, processedIssues,
-							heartbeatRunner);
+					ProcessIteratorReturnValue pirv = processIssueEventList(repoIssueEvents, Owner.org(ownerName),
+							repo.getName(), workQueue, lastFullScanStart, data, gitClient, egitClient, repoCache,
+							processedIssues, heartbeatRunner);
 
 					resultPirv = combine(resultPirv, pirv);
 				} catch (NoSuchPageException ghe) {
@@ -179,7 +182,7 @@ public class EventScan {
 
 				try {
 					ProcessIteratorReturnValue pirv = processIssueEventList(
-							issueService.pageEvents(ownerName, repo.getName()), Owner.user(ownerName), repo.getName(),
+							repo.listIssueEvents(), Owner.user(ownerName), repo.getName(),
 							workQueue, lastFullScanStart, data, gitClient, egitClient, repoCache, processedIssues,
 							heartbeatRunner);
 
@@ -225,7 +228,7 @@ public class EventScan {
 						result = combine(result, pirv);
 
 						// Next scan the issue events
-						pirv = processIssueEventList(issueService.pageEvents(ownerName, repo.getName()),
+						pirv = processIssueEventList(repo.listIssueEvents(),
 								ownerContainer.getOwner(), repo.getName(), workQueue, lastFullScanStart, data,
 								gitClient, egitClient, repoCache, processedIssues, heartbeatRunner);
 
@@ -271,193 +274,8 @@ public class EventScan {
 		return result;
 	}
 
-	private static ProcessIteratorReturnValue processIssueEventList(PageIterator<IssueEvent> it, final Owner owner,
-			String repoName, WorkQueue workQueue, long lastFullScan, EventScanData data, GitHub ghClient,
-			GitHubClient egitClient, GHRepoCache repoCache, HashSet<String> processedIssues,
-			HeartbeatThreadRunner<ProcessIteratorReturnValue> heartbeatRunner) throws IOException {
-
-		List<RepoEventScanEntry> toScan = new ArrayList<>();
-
-		final List<String> eventTypesToIgnore = Arrays.asList("subscribed", "mentioned");
-
-		long lastEventInfoCreatedAt = Long.MAX_VALUE; // Used to detect out-of-order events
-
-		// If we see X events in-a-row (eg 20) that match events we have already
-		// seen, then we assume there will be no more new (previously unseen)
-		// events in the event list.
-		int eventMatchesInARowFromEsd = 0;
-
-		boolean fullScanRequired = true;
-
-		event_loop: while (it.hasNext()) {
-
-			Collection<IssueEvent> eventList = it.next();
-
-			heartbeatRunner.informWorkUnitCompleted();
-			workQueue.waitIfNeeded(1);
-
-			// We use the EGit client here, because the Kohsuke GitHub client has not yet
-			// shipped the event API.
-			for (IssueEvent ie : eventList) {
-
-				org.eclipse.egit.github.core.Issue issue = ie.getIssue();
-
-				String actorLogin = ie.getActor() != null ? ie.getActor().getLogin() : null;
-				if (actorLogin == null) {
-					actorLogin = "ghost";
-				}
-
-				Date createdAt = ie.getCreatedAt();
-
-				if (createdAt.getTime() < lastFullScan) {
-
-					if (fullScanRequired) {
-
-						log.logDebug("Event of " + repoName
-								+ " has a 'created at' time before full scan time, so no full scan required: "
-								+ new Date(createdAt.getTime()) + ",  lastFullScanStart: " + new Date(lastFullScan));
-
-						// If there is repository event data available before the last full scan, that
-						// means our event scan data algorithm will necessarily be able to update us to
-						// the latest state of the repo.
-						fullScanRequired = false;
-					}
-
-					// There is no point in processing events after the last full scan, so break out
-					// of the loop.
-					break event_loop;
-				}
-
-				if (eventTypesToIgnore.stream().anyMatch(f -> f.equals(ie.getEvent()))) {
-					continue; // Skip some event types
-				}
-
-				if (issue.getPullRequest() != null) {
-					continue; // Skip PRs
-				}
-
-				// Detect when we are not receiving events in timestamp descending order.
-				// - we know that GH _will_ sometimes give us events out of order
-				if (createdAt != null && createdAt.getTime() > lastEventInfoCreatedAt) {
-
-					int issueNum = issue.getNumber();
-
-					log.logInfo("Received out-of-order issue event: [" + ie.getEvent() + "] " + actorLogin + " "
-							+ repoName + "/" + issueNum + " " + createdAt);
-
-					lastEventInfoCreatedAt = createdAt.getTime();
-				} else {
-					if (createdAt != null) {
-						lastEventInfoCreatedAt = createdAt.getTime();
-					}
-				}
-
-				// If we have not previously processed this event, then add the issue to the
-				// scan list.
-				{
-
-					String hash = createEventHash(ie.getEvent(), owner, repoName, issue.getNumber(), createdAt,
-							actorLogin);
-
-					boolean eventProcessed = data.isEventProcessed(hash);
-
-					if (eventProcessed) {
-						eventMatchesInARowFromEsd++;
-					} else {
-						// New Event
-						GHRepository ghRepo = repoCache.getRepository(owner.getType() == Type.ORG, owner.getName(),
-								repoName);
-
-						// Keep track of whether it came from the cache, as this means we need to do a
-						// request wait below.
-						boolean fromCache = true;
-						GHIssue ghIssue = repoCache.getIssue(ghRepo, issue.getNumber(), true);
-						if (ghIssue == null) {
-							ghIssue = repoCache.getIssue(ghRepo, issue.getNumber(), false);
-							fromCache = false;
-						}
-
-						eventMatchesInARowFromEsd = 0;
-						toScan.add(new RepoEventScanEntry(ghIssue, ghRepo, hash));
-
-						if (!fromCache) {
-							workQueue.waitIfNeeded(1);
-						}
-
-					}
-
-					log.logDebug("Received event: [" + ie.getEvent() + "] " + actorLogin + " " + repoName + "/"
-							+ issue.getNumber() + " " + ie.getCreatedAt() + " " + hash + (eventProcessed ? "*" : ""));
-
-				}
-
-				if (eventMatchesInARowFromEsd == 20) {
-					// If we match a bunch of events in our cache, this means these events have
-					// already been processed and the database is up-to-date with these changes.
-
-					// Therefore we will necessarily be able to update our database without a full
-					// scan, since we can be assured there is no missing repository event data.
-					fullScanRequired = false;
-
-					// We likewise no longer need to continue processing repository events, because
-					// we can be confident then any additional events will ALSO have already been
-					// processed.
-					break event_loop;
-				}
-
-			} // end for
-
-		} // end event-loop while
-
-		List<String> newEventHashes = new ArrayList<>();
-
-		List<IssueContainer> itemsToQueue = new ArrayList<>();
-
-		for (RepoEventScanEntry e : toScan) {
-
-			// Add _all_ the event hashes we saw....
-			newEventHashes.add(e.getHash());
-
-			// ... but prevent duplicate issues from being processed after this block.
-			{
-				String key = e.calculateKey();
-				if (processedIssues.contains(key)) {
-					continue;
-				}
-				processedIssues.add(key);
-			}
-
-			heartbeatRunner.informWorkUnitCompleted();
-			workQueue.waitIfNeeded(1);
-
-			GHRepository repo = e.getRepository();
-			GHIssue issue = e.getIssue();
-
-			itemsToQueue.add(new IssueContainer(issue, repo, owner));
-		}
-
-		if (!fullScanRequired) {
-			itemsToQueue.forEach(e -> {
-				workQueue.addIssue(e.getIssue(), e.getRepo().get(), e.getOwner());
-
-			});
-		} else {
-			// A full scan of all the repos is required, so there is no need to queue
-			// individual items here.
-
-			log.logInfo("Full scan required for " + owner.getName() + "/" + repoName);
-
-		}
-
-		newEventHashes.forEach(e -> {
-			data.addEventIfNotPresent(e);
-		});
-
-		return new ProcessIteratorReturnValue(newEventHashes, fullScanRequired);
-
-	}
-	
-	private static ProcessIteratorReturnValue processIssueEventListNew(PageIterator<IssueEvent> it, final Owner owner,
+	@SuppressWarnings("unused")
+	private static ProcessIteratorReturnValue processIssueEventListOld(PageIterator<IssueEvent> it, final Owner owner,
 			String repoName, WorkQueue workQueue, long lastFullScan, EventScanData data, GitHub ghClient,
 			GitHubClient egitClient, GHRepoCache repoCache, HashSet<String> processedIssues,
 			HeartbeatThreadRunner<ProcessIteratorReturnValue> heartbeatRunner) throws IOException {
@@ -643,6 +461,182 @@ public class EventScan {
 
 	}
 
+	private static ProcessIteratorReturnValue processIssueEventList(PagedIterable<GHIssueEvent> repoIssueEvents,
+			final Owner owner, String repoName, WorkQueue workQueue, long lastFullScan, EventScanData data,
+			GitHub ghClient, GitHubClient egitClient, GHRepoCache repoCache, HashSet<String> processedIssues,
+			HeartbeatThreadRunner<ProcessIteratorReturnValue> heartbeatRunner) throws IOException {
+
+		List<RepoEventScanEntry> toScan = new ArrayList<>();
+
+		final List<String> eventTypesToIgnore = Arrays.asList("subscribed", "mentioned");
+
+		long lastEventInfoCreatedAt = Long.MAX_VALUE; // Used to detect out-of-order events
+
+		// If we see X events in-a-row (eg 20) that match events we have already
+		// seen, then we assume there will be no more new (previously unseen)
+		// events in the event list.
+		int eventMatchesInARowFromEsd = 0;
+
+		boolean fullScanRequired = true;
+		
+		event_loop: for(PagedIterator<GHIssueEvent> it = repoIssueEvents.iterator(); it.hasNext();) {
+			GHIssueEvent ie = it.next();
+			heartbeatRunner.informWorkUnitCompleted();
+			workQueue.waitIfNeeded(1);
+
+			GHIssue issue = ie.getIssue();
+
+			String actorLogin = ie.getActor() != null ? ie.getActor().getLogin() : null;
+			if (actorLogin == null) {
+				actorLogin = "ghost";
+			}
+
+			Date createdAt = ie.getCreatedAt();
+
+			if (createdAt.getTime() < lastFullScan) {
+
+				if (fullScanRequired) {
+
+					log.logDebug("Event of " + repoName
+							+ " has a 'created at' time before full scan time, so no full scan required: "
+							+ new Date(createdAt.getTime()) + ",  lastFullScanStart: " + new Date(lastFullScan));
+
+					// If there is repository event data available before the last full scan, that
+					// means our event scan data algorithm will necessarily be able to update us to
+					// the latest state of the repo.
+					fullScanRequired = false;
+				}
+
+				// There is no point in processing events after the last full scan, so break out
+				// of the loop.
+				break event_loop;
+			}
+
+			if (eventTypesToIgnore.stream().anyMatch(f -> f.equals(ie.getEvent()))) {
+				continue; // Skip some event types
+			}
+
+			if (issue.getPullRequest() != null) {
+				continue; // Skip PRs
+			}
+
+			// Detect when we are not receiving events in timestamp descending order.
+			// - we know that GH _will_ sometimes give us events out of order
+			if (createdAt != null && createdAt.getTime() > lastEventInfoCreatedAt) {
+
+				int issueNum = issue.getNumber();
+
+				log.logInfo("Received out-of-order issue event: [" + ie.getEvent() + "] " + actorLogin + " "
+						+ repoName + "/" + issueNum + " " + createdAt);
+
+				lastEventInfoCreatedAt = createdAt.getTime();
+			} else {
+				if (createdAt != null) {
+					lastEventInfoCreatedAt = createdAt.getTime();
+				}
+			}
+
+			// If we have not previously processed this event, then add the issue to the
+			// scan list.
+			{
+
+				String hash = createEventHash(ie.getEvent(), owner, repoName, issue.getNumber(), createdAt,
+						actorLogin);
+
+				boolean eventProcessed = data.isEventProcessed(hash);
+
+				if (eventProcessed) {
+					eventMatchesInARowFromEsd++;
+				} else {
+					// New Event
+					GHRepository ghRepo = repoCache.getRepository(owner.getType() == Type.ORG, owner.getName(),
+							repoName);
+
+					// Keep track of whether it came from the cache, as, if not, this means we need to do a
+					// request wait below.
+					boolean fromCache = true;
+					GHIssue ghIssue = repoCache.getIssue(ghRepo, issue.getNumber(), true);
+					if (ghIssue == null) {
+						ghIssue = repoCache.getIssue(ghRepo, issue.getNumber(), false);
+						fromCache = false;
+					}
+
+					eventMatchesInARowFromEsd = 0;
+					toScan.add(new RepoEventScanEntry(ghIssue, ghRepo, hash));
+
+					if (!fromCache) {
+						workQueue.waitIfNeeded(1);
+					}
+
+				}
+
+				log.logDebug("Received event: [" + ie.getEvent() + "] " + actorLogin + " " + repoName + "/"
+						+ issue.getNumber() + " " + ie.getCreatedAt() + " " + hash + (eventProcessed ? "*" : ""));
+
+			}
+
+			if (eventMatchesInARowFromEsd == 20) {
+				// If we match a bunch of events in our cache, this means these events have
+				// already been processed and the database is up-to-date with these changes.
+
+				// Therefore we will necessarily be able to update our database without a full
+				// scan, since we can be assured there is no missing repository event data.
+				fullScanRequired = false;
+
+				// We likewise no longer need to continue processing repository events, because
+				// we can be confident then any additional events will ALSO have already been
+				// processed.
+				break event_loop;
+			}			
+		}
+
+		
+		List<String> newEventHashes = new ArrayList<>();
+
+		List<IssueContainer> itemsToQueue = new ArrayList<>();
+
+		for (RepoEventScanEntry e : toScan) {
+
+			// Add _all_ the event hashes we saw....
+			newEventHashes.add(e.getHash());
+
+			// ... but prevent duplicate issues from being processed after this block.
+			{
+				String key = e.calculateKey();
+				if (processedIssues.contains(key)) {
+					continue;
+				}
+				processedIssues.add(key);
+			}
+
+			heartbeatRunner.informWorkUnitCompleted();
+			workQueue.waitIfNeeded(1);
+
+			GHRepository repo = e.getRepository();
+			GHIssue issue = e.getIssue();
+
+			itemsToQueue.add(new IssueContainer(issue, repo, owner));
+		}
+
+		if (!fullScanRequired) {
+			itemsToQueue.forEach(e -> {
+				workQueue.addIssue(e.getIssue(), e.getRepo().get(), e.getOwner());
+			});
+		} else {
+			// A full scan of all the repos is required, so there is no need to queue
+			// individual items here.
+
+			log.logInfo("Full scan required for " + owner.getName() + "/" + repoName);
+
+		}
+
+		newEventHashes.forEach(e -> {
+			data.addEventIfNotPresent(e);
+		});
+
+		return new ProcessIteratorReturnValue(newEventHashes, fullScanRequired);
+
+	}
 
 	/**
 	 * @param repoCache
