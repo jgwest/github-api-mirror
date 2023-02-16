@@ -9,7 +9,7 @@
 	<dependencies>
 		<dependency>
 			<groupId>github-api-mirror</groupId>
-			<artifactId>GitHubApiMirrorService</artifactId>
+			<artifactId>GitHubApiMirrorServiceWar</artifactId>
 			<version>1.0.0</version>
 			<type>war</type>
 		</dependency>

@@ -44,41 +44,13 @@ import com.githubapimirror.service.yaml.IndividualRepoListYaml;
  */
 public class ApiMirrorInstance {
 
-//	@ConfigProperty(name = "config.path")
-//	Optional<String> configPathProperty;
-//
-//	@ConfigProperty(name = "db.path")
-//	Optional<String> dbPathProperty;
-//
 	private static final ApiMirrorInstance instance = new ApiMirrorInstance();
-//
-//	private ApiMirrorInstance() {
-//		this.db = null;
-//		this.presharedKey = null;
-//		this.serverInstance = null;
-//	}
 
 	private ApiMirrorInstance() {
+
+		String configPath = lookupString("github-api-mirror/config-path").get();
+
 		try {
-
-//			String configPath = configPathProperty.orElse(null);
-//			if (configPath == null || configPath.isBlank()) {
-//				System.err.println("Warning: Config path is empty.");
-//				this.db = null;
-//				this.presharedKey = null;
-//				this.serverInstance = null;
-//				return;
-//			}
-
-			String configPath = lookupString("github-api-mirror/config-path").orElse(null);
-			if (configPath == null || configPath.isBlank()) {
-				System.err.println("Warning: Config path is empty.");
-				this.db = null;
-				this.presharedKey = null;
-				this.serverInstance = null;
-				return;
-			}
-
 			ObjectMapper mapper = new ObjectMapper(new YAMLFactory());
 
 			List<String> userReposList = new ArrayList<>();
@@ -99,15 +71,11 @@ public class ApiMirrorInstance {
 
 			String dbPath = configYaml.getDbPath();
 
-//			if (dbPathProperty.isPresent() && !dbPathProperty.get().isBlank()) {
-//				dbPath = dbPathProperty.get();
-//			}
-
-			String lookupString = lookupString("db.path").orElse(null);
-
-			// Allow the configuration file value to be overriden by config
-			if (lookupString != null && !lookupString.isEmpty()) {
-				dbPath = lookupString;
+			// The database path of the YAML can be override by this JNDI value in the
+			// server.xml. This is used when running within a container.
+			Optional<String> jndiOverride = lookupString("github-api-mirror/db-path");
+			if (jndiOverride.isPresent()) {
+				dbPath = jndiOverride.get();
 			}
 
 			ServerInstanceBuilder builder = ServerInstance.builder()
@@ -151,9 +119,6 @@ public class ApiMirrorInstance {
 			db = serverInstance.getDb();
 
 		} catch (IOException e) {
-			e.printStackTrace();
-			throw new RuntimeException(e);
-		} catch (Exception e) {
 			e.printStackTrace();
 			throw new RuntimeException(e);
 		}

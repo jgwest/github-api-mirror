@@ -35,7 +35,7 @@ public class TestFilter implements GhmFilter {
 	}
 
 	@Override
-	public boolean processOwner(Owner owner) {		
+	public boolean processOwner(Owner owner) {
 		return pairs.stream().anyMatch(e -> e.owner.equals(owner));
 	}
 

@@ -59,7 +59,7 @@ public class ApiMirrorService {
 
 	@GET
 	@Path("/organization/{name}")
-	public Response getOrganization(@PathParam("name") String orgName) {		
+	public Response getOrganization(@PathParam("name") String orgName) {
 		verifyHeaderAuth();
 
 		Database db = getDb();

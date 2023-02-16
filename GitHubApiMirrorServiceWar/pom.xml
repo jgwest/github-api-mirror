@@ -3,20 +3,14 @@
 	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>github-api-mirror</groupId>
-	<artifactId>GitHubApiMirrorService</artifactId>
+	<artifactId>GitHubApiMirrorServiceWar</artifactId>
 	<version>1.0.0</version>
-	<!-- <packaging>war</packaging> -->
+	<packaging>war</packaging>
 
 	<dependencies>
 		<dependency>
 			<groupId>github-api-mirror</groupId>
-			<artifactId>GitHubApiMirrorShared</artifactId>
-			<version>1.0.0</version>
-		</dependency>
-
-		<dependency>
-			<groupId>github-api-mirror</groupId>
-			<artifactId>GitHubApiMirror</artifactId>
+			<artifactId>GitHubApiMirrorService</artifactId>
 			<version>1.0.0</version>
 		</dependency>
 
@@ -34,12 +28,6 @@
 			<scope>provided</scope>
 		</dependency>
 
-		<dependency>
-			<groupId>org.eclipse.microprofile.config</groupId>
-			<artifactId>microprofile-config-api</artifactId>
-			<version>2.0</version>
-		</dependency>
-
 
 	</dependencies>
 
@@ -55,25 +43,13 @@
 					<target>1.8</target>
 				</configuration>
 			</plugin>
-			<!-- <plugin> <artifactId>maven-war-plugin</artifactId> <version>3.0.0</version> 
-				<configuration> <warSourceDirectory>WebContent</warSourceDirectory> </configuration> 
-				</plugin> -->
-
 			<plugin>
-				<groupId>org.jboss.jandex</groupId>
-				<artifactId>jandex-maven-plugin</artifactId>
-				<version>1.1.0</version>
-				<executions>
-					<execution>
-						<id>make-index</id>
-						<goals>
-							<goal>jandex</goal>
-						</goals>
-					</execution>
-				</executions>
+				<artifactId>maven-war-plugin</artifactId>
+				<version>3.0.0</version>
+				<configuration>
+					<warSourceDirectory>WebContent</warSourceDirectory>
+				</configuration>
 			</plugin>
 		</plugins>
-
-
 	</build>
 </project>

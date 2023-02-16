@@ -276,7 +276,7 @@ public class ServerInstance {
 
 		this.supportsRateLimit = weSupportRateLimit;
 
-		for (int x = 0; x < 1; x++) { // TODO: Put this back to 5
+		for (int x = 0; x < 5; x++) {
 			WorkerThread wt = new WorkerThread(queue, filter);
 			wt.start();
 		}

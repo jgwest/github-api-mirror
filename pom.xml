@@ -12,8 +12,10 @@
 	<modules>
 		<module>GitHubApiMirrorClient</module>
 		<module>GitHubApiMirrorService</module>
+		<module>GitHubApiMirrorServiceWar</module>
 		<module>GitHubApiMirrorShared</module>
 		<module>GitHubApiMirror</module>
 		<module>GitHubApiMirrorLiberty</module>
+		<module>GitHubApiMirrorQuarkus</module>
 	</modules>
 </project>
