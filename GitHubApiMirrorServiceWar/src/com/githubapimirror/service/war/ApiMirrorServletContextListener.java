@@ -14,15 +14,19 @@
  * limitations under the License. 
 */
 
-package com.githubapimirror.service;
+package com.githubapimirror.service.war;
 
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
+import javax.naming.InitialContext;
+import javax.naming.NamingException;
 import javax.servlet.ServletContextEvent;
 import javax.servlet.ServletContextListener;
 import javax.servlet.annotation.WebListener;
 
 import com.githubapimirror.GHLog;
+import com.githubapimirror.service.ApiMirrorInstance;
 import com.githubapimirror.shared.GHApiUtil;
 
 /**
@@ -35,18 +39,47 @@ public class ApiMirrorServletContextListener implements ServletContextListener {
 	private final GHLog log = GHLog.getInstance();
 
 	public void contextInitialized(ServletContextEvent servletContextEvent) {
-//		try {
-//			log.logInfo("* GitHubApiMirrorService started.");
-//			ApiMirrorInstance.getInstance().getDb();
-//			startThreadDumpThread();
-//		} catch (RuntimeException re) {
-//			re.printStackTrace();
-//			throw re;
-//		}
+		try {
+			log.logInfo("* WAR GitHubApiMirrorService started.");
+
+			String configPath = lookupString("github-api-mirror/config-path").get();
+
+			
+			String dbPath = null;
+			
+			// The database path of the YAML can be override by this JNDI value in the
+			// server.xml. This is used when running within a container.
+			Optional<String> jndiOverride = lookupString("github-api-mirror/db-path");
+			if (jndiOverride.isPresent()) {
+				dbPath = jndiOverride.get();
+			}
+
+			ApiMirrorInstance.getInstance().initializeServerInstance(configPath, dbPath);
+			
+			startThreadDumpThread();
+		} catch (RuntimeException re) {
+			re.printStackTrace();
+			throw re;
+		}
 	}
 
 	public void contextDestroyed(ServletContextEvent servletContextEvent) {
 	}
+	
+	private static Optional<String> lookupString(String key) {
+
+		try {
+			InitialContext context = new InitialContext();
+			Object value = context.lookup(key);
+			if (value == null) {
+				return Optional.empty();
+			}
+			return Optional.of(value.toString());
+		} catch (NamingException e) {
+			return Optional.empty();
+		}
+	}
+
 
 	/** Start a thread which outputs all the VM's thread stacks traces. */
 	private void startThreadDumpThread() {

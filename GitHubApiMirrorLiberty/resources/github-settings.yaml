@@ -15,7 +15,8 @@ githubPassword: # FILL THIS IN - GitHub server password (or personal access toke
 
 #(Optional) Rather than specifying an org, or user, as above, one may just specify individual repos, eg:
 #individualRepoList:
-#- jgwest/github-api-mirror
+#  - repo: jgwest/github-api-mirror
+#    timeBetweenEventScansInSeconds: 600
 
 presharedKey: # FILL THIS IN - This is an arbitrary personal access token that is shared between the GHAM server and GHAM client.
 dbPath: # FILL THIS IN - Path to a directory to store the database. If this is a relative path, it will be relative to the Open Liberty server/ directory.

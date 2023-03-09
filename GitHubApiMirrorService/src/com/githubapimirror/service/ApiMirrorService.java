@@ -44,7 +44,7 @@ import com.githubapimirror.shared.json.UserRepositoriesJson;
 
 /**
  * A JAX-RS resource class that listens on resource requests to
- * Orgs/Repositores/Issues/Users, queries the database, then returns the result.
+ * Orgs/Repositories/Issues/Users, queries the database, then returns the result.
  * 
  * Before processing a request, the pre-shared key is verified, here.
  */

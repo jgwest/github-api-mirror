@@ -707,9 +707,6 @@ public class ServerInstance {
 		public void setTimeBetweenEventScanInSeconds(Long secondsParam, GHRepository repo) {
 			String key = repo.getOwnerName() + "/" + repo.getName();
 
-			// TODO: Remove me once debugging is done.
-//			System.out.println("setTimeBetweenEventScanInSeconds -> " + secondsParam + " " + repo.getName());
-
 			long inNanoSeconds;
 
 			if (secondsParam != null) {
@@ -783,14 +780,6 @@ public class ServerInstance {
 			} else {
 				result = false;
 			}
-
-			// TODO: Remove me once debugging is done.
-//			String debugStr = "null";
-//			if (nextScan != null) {
-//				debugStr = "" + TimeUnit.SECONDS.convert(nextScan - System.nanoTime(), TimeUnit.NANOSECONDS);
-//			}
-//
-//			System.out.println(key + " " + result + " (" + debugStr + ")");
 
 			return result;
 

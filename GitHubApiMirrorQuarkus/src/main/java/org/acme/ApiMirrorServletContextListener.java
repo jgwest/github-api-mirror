@@ -14,15 +14,20 @@
  * limitations under the License. 
 */
 
-package com.githubapimirror.service;
+package org.acme;
 
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.servlet.ServletContextEvent;
 import javax.servlet.ServletContextListener;
 import javax.servlet.annotation.WebListener;
 
+import org.eclipse.microprofile.config.inject.ConfigProperty;
+
 import com.githubapimirror.GHLog;
+import com.githubapimirror.service.ApiMirrorInstance;
 import com.githubapimirror.shared.GHApiUtil;
 
 /**
@@ -30,19 +35,29 @@ import com.githubapimirror.shared.GHApiUtil;
  * ZHServerInstance also start (kicking off the necessary background threads).
  */
 @WebListener
+@ApplicationScoped
 public class ApiMirrorServletContextListener implements ServletContextListener {
+
+	@ConfigProperty(name = "config.path")
+	Optional<String> configPathProperty;
+
+	@ConfigProperty(name = "db.path")
+	Optional<String> dbPathProperty;
 
 	private final GHLog log = GHLog.getInstance();
 
 	public void contextInitialized(ServletContextEvent servletContextEvent) {
-//		try {
-//			log.logInfo("* GitHubApiMirrorService started.");
-//			ApiMirrorInstance.getInstance().getDb();
-//			startThreadDumpThread();
-//		} catch (RuntimeException re) {
-//			re.printStackTrace();
-//			throw re;
-//		}
+		try {
+			log.logInfo("* Quarkus GitHubApiMirrorService started: " + configPathProperty);
+
+			ApiMirrorInstance.getInstance().initializeServerInstance(configPathProperty.orElse(null),
+					dbPathProperty.orElse(null));
+			
+			startThreadDumpThread();
+		} catch (RuntimeException re) {
+			re.printStackTrace();
+			throw re;
+		}
 	}
 
 	public void contextDestroyed(ServletContextEvent servletContextEvent) {

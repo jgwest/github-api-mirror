@@ -42,24 +42,24 @@ import com.githubapimirror.service.yaml.IndividualRepoListYaml;
  * 
  * This class also handles initial configuration of the above classes.
  */
-public class ApiMirrorInstance {
+public final class ApiMirrorInstance {
 
-//	@ConfigProperty(name = "config.path")
-//	Optional<String> configPathProperty;
-//
-//	@ConfigProperty(name = "db.path")
-//	Optional<String> dbPathProperty;
-//
 	private static final ApiMirrorInstance instance = new ApiMirrorInstance();
-//
-//	private ApiMirrorInstance() {
-//		this.db = null;
-//		this.presharedKey = null;
-//		this.serverInstance = null;
-//	}
+
+	private final Object lock = new Object();
 
 	private ApiMirrorInstance() {
+	}
+
+	public void initializeServerInstance(String configPath, String dbPath) {
+		
+		Thread.dumpStack();
+		
 		try {
+
+			if (configPath == null) {
+				return;
+			}
 
 //			String configPath = configPathProperty.orElse(null);
 //			if (configPath == null || configPath.isBlank()) {
@@ -70,14 +70,14 @@ public class ApiMirrorInstance {
 //				return;
 //			}
 
-			String configPath = lookupString("github-api-mirror/config-path").orElse(null);
-			if (configPath == null || configPath.isBlank()) {
-				System.err.println("Warning: Config path is empty.");
-				this.db = null;
-				this.presharedKey = null;
-				this.serverInstance = null;
-				return;
-			}
+//			String configPath = lookupString("github-api-mirror/config-path").orElse(null);
+//			if (configPath == null || configPath.isBlank()) {
+//				System.err.println("Warning: Config path is empty.");
+//				this.db = null;
+//				this.presharedKey = null;
+//				this.serverInstance = null;
+//				return;
+//			}
 
 			ObjectMapper mapper = new ObjectMapper(new YAMLFactory());
 
@@ -87,8 +87,6 @@ public class ApiMirrorInstance {
 			ConfigFileYaml configYaml = mapper.readValue(new FileInputStream(new File(configPath)),
 					ConfigFileYaml.class);
 
-			this.presharedKey = configYaml.getPresharedKey();
-
 			if (configYaml.getUserRepoList() != null) {
 				userReposList.addAll(configYaml.getUserRepoList());
 			}
@@ -97,21 +95,30 @@ public class ApiMirrorInstance {
 				orgList.addAll(configYaml.getOrgList());
 			}
 
-			String dbPath = configYaml.getDbPath();
-
+			// If the user has not overriden the configuration, then use the config YAML value
+			if(dbPath == null) {
+				dbPath = configYaml.getDbPath();	
+			}
+			
+//
 //			if (dbPathProperty.isPresent() && !dbPathProperty.get().isBlank()) {
 //				dbPath = dbPathProperty.get();
 //			}
 
-			String lookupString = lookupString("db.path").orElse(null);
+//			String lookupString = lookupString("db.path").orElse(null);
+//
+//			// Allow the configuration file value to be overriden by config
+//			if (lookupString != null && !lookupString.isEmpty()) {
+//				dbPath = lookupString;
+//			}
 
-			// Allow the configuration file value to be overriden by config
-			if (lookupString != null && !lookupString.isEmpty()) {
-				dbPath = lookupString;
+			File dbPathFile = new File(dbPath);
+			if (dbPathFile == null || !dbPathFile.exists()) {
+				throw new RuntimeException("Database path does not exist: " + dbPathFile);
 			}
 
 			ServerInstanceBuilder builder = ServerInstance.builder()
-					.credentials(configYaml.getGithubUsername(), configYaml.getGithubPassword()).dbDir(new File(dbPath))
+					.credentials(configYaml.getGithubUsername(), configYaml.getGithubPassword()).dbDir(dbPathFile)
 					.serverName(configYaml.getGithubServer());
 
 			if (!orgList.isEmpty()) {
@@ -146,9 +153,15 @@ public class ApiMirrorInstance {
 				builder = builder.fileLoggingPath(new File(configYaml.getFileLoggerPath()));
 			}
 
-			this.serverInstance = builder.build();
-
-			db = serverInstance.getDb();
+			synchronized (lock) {
+				if (this.serverInstance_synch_lock == null) {
+					this.presharedKey_synch_lock = configYaml.getPresharedKey();
+					this.serverInstance_synch_lock = builder.build();
+					this.db_sync_lock = serverInstance_synch_lock.getDb();
+				} else {
+					throw new RuntimeException(this.getClass().getName() + " is already initialized");
+				}
+			}
 
 		} catch (IOException e) {
 			e.printStackTrace();
@@ -159,19 +172,19 @@ public class ApiMirrorInstance {
 		}
 	}
 
-	private static Optional<String> lookupString(String key) {
-
-		try {
-			InitialContext context = new InitialContext();
-			Object value = context.lookup(key);
-			if (value == null) {
-				return Optional.empty();
-			}
-			return Optional.of(value.toString());
-		} catch (NamingException e) {
-			return Optional.empty();
-		}
-	}
+//	private static Optional<String> lookupString(String key) {
+//
+//		try {
+//			InitialContext context = new InitialContext();
+//			Object value = context.lookup(key);
+//			if (value == null) {
+//				return Optional.empty();
+//			}
+//			return Optional.of(value.toString());
+//		} catch (NamingException e) {
+//			return Optional.empty();
+//		}
+//	}
 
 	public static ApiMirrorInstance getInstance() {
 		return instance;
@@ -179,22 +192,39 @@ public class ApiMirrorInstance {
 
 	// -----------------------------------------
 
-	private final ServerInstance serverInstance;
+	private ServerInstance serverInstance_synch_lock;
 
-	private final Database db;
+	private Database db_sync_lock;
 
-	private final String presharedKey;
+	private String presharedKey_synch_lock;
+
+	// -----------------------------------------
 
 	public Database getDb() {
-		return db;
+		synchronized (lock) {
+			if (db_sync_lock == null) {
+				throw new RuntimeException(this.getClass().getName() + " not initialized.");
+			}
+			return db_sync_lock;
+		}
 	}
 
 	public String getPresharedKey() {
-		return presharedKey;
+		synchronized (lock) {
+			if (serverInstance_synch_lock == null) {
+				throw new RuntimeException(this.getClass().getName() + " not initialized.");
+			}
+			return presharedKey_synch_lock;
+		}
 	}
 
 	public ServerInstance getServerInstance() {
-		return serverInstance;
+		synchronized (lock) {
+			if (serverInstance_synch_lock == null) {
+				throw new RuntimeException(this.getClass().getName() + " not initialized.");
+			}
+			return serverInstance_synch_lock;
+		}
 	}
 
 }
