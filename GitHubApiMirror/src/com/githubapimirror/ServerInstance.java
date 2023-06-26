@@ -22,6 +22,7 @@ import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Calendar;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
@@ -90,10 +91,11 @@ public class ServerInstance {
 
 	private final NewFileLogger fileLogger;
 
-	private ServerInstance(String username, String password, String serverName, List<String> orgNames,
-			List<String> userRepos, List<RepoConstructorEntry> individualRepos, long pauseBetweenRequestsInMsecs,
-			File dbDir, long timeBetweenEventScansInSeconds, GhmFilter filter, int numRequestsPerHour,
-			File fileLogPath) {
+	private ServerInstance(String username, String password, String serverName, List<String> ownerNames,
+			/*
+			 * List<String> orgNames, List<String> userRepos,
+			 */ List<RepoConstructorEntry> individualRepos, long pauseBetweenRequestsInMsecs, File dbDir,
+			long timeBetweenEventScansInSeconds, GhmFilter filter, int numRequestsPerHour, File fileLogPath) {
 
 		if (filter == null) {
 			filter = new PermissiveFilter();
@@ -108,49 +110,47 @@ public class ServerInstance {
 		// eclipse/che individual repo.
 		List<String> ownersOfIndividualRepos = individualRepoNames.stream().map(e -> e.substring(0, e.indexOf("/")))
 				.distinct().collect(Collectors.toList());
-		if (ownersOfIndividualRepos.stream().anyMatch(e -> orgNames.contains(e))
-				|| ownersOfIndividualRepos.stream().anyMatch(e -> userRepos.contains(e))) {
+		if (ownersOfIndividualRepos.stream().anyMatch(e -> ownerNames.contains(e))) {
 			throw new RuntimeException(
 					"You cannot include an individual repo if you have also included the organization of that repo.");
 		}
 
-		db = new InMemoryCacheDb(new PersistJsonDb(dbDir));
+		List<GHOrganization> orgObjects = new ArrayList<>();
+		List<GHUser> userRepoObjects = new ArrayList<>();
 
-		db.uninitializeDatabaseOnContentsMismatch(orgNames, userRepos, individualRepoNames);
-
-		queue = new WorkQueue(this, db, numRequestsPerHour, pauseBetweenRequestsInMsecs);
-
-		GitHub githubClient;
+		ghOwners = new ArrayList<>();
 		boolean weSupportRateLimit = false;
-
 		NextEventScanInNanos nextEventScanSettings = new NextEventScanInNanos(timeBetweenEventScansInSeconds);
 
+		GitHubClient egitGitHubClient = null;
+		GitHub githubClient = null;
+
+		// If we have hit the API rate limit, keep trying to get the org/user until we
+		// succeed.
+		boolean success = false;
 		try {
-
-			GitHubBuilder builder = GitHubBuilder.fromEnvironment();
-
-			if (serverName.toLowerCase().endsWith("github.com")) {
-				builder = builder.withPassword(username, password);
-				egitClient = new GitHubClient();
-			} else {
-				builder = builder.withEndpoint("https://" + serverName + "/api/v3").withPassword(username, password);
-				egitClient = new GitHubClient(serverName);
-			}
-
-			githubClient = builder.withRateLimitHandler(RateLimitHandler.FAIL)
-					.withAbuseLimitHandler(AbuseLimitHandler.FAIL).build();
-			this.githubClientInstance = githubClient;
-
-			ghOwners = new ArrayList<>();
-
-			egitClient.setCredentials(username, password);
-
-			// If we have hit the API rate limit, keep trying to get the org/user until we
-			// succeed.
-			boolean success = false;
 			do {
 
 				try {
+
+					{
+						GitHubBuilder builder = GitHubBuilder.fromEnvironment();
+
+						if (serverName.toLowerCase().endsWith("github.com")) {
+							builder = builder.withPassword(username, password);
+							egitGitHubClient = new GitHubClient();
+						} else {
+							builder = builder.withEndpoint("https://" + serverName + "/api/v3").withPassword(username,
+									password);
+							egitGitHubClient = new GitHubClient(serverName);
+						}
+
+						githubClient = builder.withRateLimitHandler(RateLimitHandler.FAIL)
+								.withAbuseLimitHandler(AbuseLimitHandler.FAIL).build();
+
+						egitGitHubClient.setCredentials(username, password);
+
+					}
 
 					if (githubClient.getRateLimit().remaining == 1000000) {
 						// The Java GitHub we use returns 1000000 if Rate Limit is not enabled
@@ -159,26 +159,36 @@ public class ServerInstance {
 						weSupportRateLimit = true;
 					}
 
+					orgObjects.clear();
+					userRepoObjects.clear();
 					ghOwners.clear();
 
-					if (orgNames != null) { // Resolve the orgs
-						for (String orgName : orgNames) {
-							GHOrganization org = githubClient.getOrganization(orgName);
-							if (org == null) {
-								throw new RuntimeException("GitHub org not found: " + orgName);
+					for (String owner : ownerNames) {
+						try {
+							GHOrganization org = githubClient.getOrganization(owner);
+							if (org != null) {
+								orgObjects.add(org);
+								ghOwners.add(new OwnerContainer(org));
+								continue;
 							}
-							ghOwners.add(new OwnerContainer(org));
+						} catch (Exception e1) {
+							// TODO Auto-generated catch block
+							e1.printStackTrace();
 						}
-					}
 
-					if (userRepos != null) { // Resolve the user repos
-						for (String userName : userRepos) {
-							GHUser user = githubClient.getUser(userName);
-							if (user == null) {
-								throw new RuntimeException("GitHub user not found: " + userName);
+						try {
+							GHUser user = githubClient.getUser(owner);
+							if (user != null) {
+								userRepoObjects.add(user);
+								ghOwners.add(new OwnerContainer(user));
+								continue;
 							}
-							ghOwners.add(new OwnerContainer(user));
+						} catch (Exception e1) {
+							e1.printStackTrace();
 						}
+
+						throw new RuntimeException("Unable to resolve owner: " + owner);
+
 					}
 
 					if (individualRepos != null) { // Resolve the individual repos
@@ -269,10 +279,25 @@ public class ServerInstance {
 				}
 
 			} while (!success);
-
-		} catch (IOException e) {
-			throw new UncheckedIOException(e);
+		} catch (Throwable outerException) {
+			throw new RuntimeException(outerException);
 		}
+
+		if(githubClient == null || egitGitHubClient == null) { // Sanity check
+			throw new RuntimeException("Unable to initialize GitHub clients");
+		}
+		
+		this.githubClientInstance = githubClient;
+		this.egitClient = egitGitHubClient;
+
+		db = new InMemoryCacheDb(new PersistJsonDb(dbDir));
+
+		db.uninitializeDatabaseOnContentsMismatch(
+				orgObjects.stream().map(org -> org.getLogin()).collect(Collectors.toList()),
+				userRepoObjects.stream().map(user -> user.getLogin()).collect(Collectors.toList()),
+				individualRepoNames);
+
+		queue = new WorkQueue(this, db, numRequestsPerHour, pauseBetweenRequestsInMsecs);
 
 		this.supportsRateLimit = weSupportRateLimit;
 
@@ -284,6 +309,168 @@ public class ServerInstance {
 		backgroundSchedulerThread = new BackgroundSchedulerThread(nextEventScanSettings);
 		backgroundSchedulerThread.start();
 
+//		try {
+//
+////			{
+////				GitHubBuilder builder = GitHubBuilder.fromEnvironment();
+////
+////				if (serverName.toLowerCase().endsWith("github.com")) {
+////					builder = builder.withPassword(username, password);
+////					egitClient = new GitHubClient();
+////				} else {
+////					builder = builder.withEndpoint("https://" + serverName + "/api/v3").withPassword(username,
+////							password);
+////					egitClient = new GitHubClient(serverName);
+////				}
+////
+////				githubClient = builder.withRateLimitHandler(RateLimitHandler.FAIL)
+////						.withAbuseLimitHandler(AbuseLimitHandler.FAIL).build();
+////				this.githubClientInstance = githubClient;
+////
+////				egitClient.setCredentials(username, password);
+////			}
+////
+////			ghOwners = new ArrayList<>();
+//
+//			// If we have hit the API rate limit, keep trying to get the org/user until we
+//			// succeed.
+//			boolean success = false;
+//			do {
+//
+//				try {
+//
+//					if (githubClient.getRateLimit().remaining == 1000000) {
+//						// The Java GitHub we use returns 1000000 if Rate Limit is not enabled
+//						weSupportRateLimit = false;
+//					} else {
+//						weSupportRateLimit = true;
+//					}
+//
+//					ghOwners.clear();
+//
+//					if (orgNames != null) { // Resolve the orgs
+//						for (String orgName : orgNames) {
+//							GHOrganization org = githubClient.getOrganization(orgName);
+//							if (org == null) {
+//								throw new RuntimeException("GitHub org not found: " + orgName);
+//							}
+//							ghOwners.add(new OwnerContainer(org));
+//						}
+//					}
+//
+//					if (userRepos != null) { // Resolve the user repos
+//						for (String userName : userRepos) {
+//							GHUser user = githubClient.getUser(userName);
+//							if (user == null) {
+//								throw new RuntimeException("GitHub user not found: " + userName);
+//							}
+//							ghOwners.add(new OwnerContainer(user));
+//						}
+//					}
+//
+//					if (individualRepos != null) { // Resolve the individual repos
+//
+//						Map<String /* org/user name */, List<RepositoryContainer>> irOwners = new HashMap<>();
+//
+//						// Determine if the repo string refers to an org or a user repo, resolve it,
+//						// then add it to the individual repo list.
+//						for (RepoConstructorEntry indivRepoFor : individualRepos) {
+//
+//							String fullRepoName = indivRepoFor.getRepo();
+//							int slashIndex = fullRepoName.indexOf("/");
+//							if (slashIndex == -1) {
+//								throw new RuntimeException("Invalid repository format: " + fullRepoName);
+//							}
+//
+//							String ownerName = fullRepoName.substring(0, slashIndex);
+//							String repoName = fullRepoName.substring(slashIndex + 1);
+//
+//							GHOrganization org = null;
+//							GHUser user = null;
+//							try {
+//								org = githubClient.getOrganization(ownerName);
+//							} catch (Exception e) {
+//								// Ignore; will try retrieving it as a user, next.
+//							}
+//							if (org == null) {
+//								user = githubClient.getUser(ownerName);
+//								if (user == null) {
+//									throw new RuntimeException("Unable to find user repo or org for: " + fullRepoName);
+//								}
+//							}
+//
+//							Owner owner = Owner.org(ownerName);
+//
+//							GHRepository repo;
+//
+//							if (org != null) {
+//								repo = org.getRepository(repoName);
+//							} else {
+//								repo = user.getRepository(repoName);
+//							}
+//
+//							if (repo == null) {
+//								throw new RuntimeException(
+//										"Unable to find user repo or org, after request to GitHub API: "
+//												+ fullRepoName);
+//							}
+//
+//							nextEventScanSettings.setTimeBetweenEventScanInSeconds(
+//									indivRepoFor.getTimeBetweenEventScansInSeconds().orElse(null), repo);
+//
+//							RepositoryContainer rc = new RepositoryContainer(owner, repo);
+//
+//							List<RepositoryContainer> listOfReposPerOwner = irOwners.computeIfAbsent(ownerName,
+//									e -> new ArrayList<RepositoryContainer>());
+//							listOfReposPerOwner.add(rc);
+//
+//						}
+//
+//						irOwners.forEach((ownerName, ownerRepos) -> {
+//							if (ownerRepos.size() == 0) {
+//								return;
+//							}
+//
+//							Owner owner = ownerRepos.get(0).getOwner();
+//
+//							List<GHRepository> repositories = ownerRepos.stream().map(e -> e.getRepo())
+//									.collect(Collectors.toList());
+//
+//							ghOwners.add(new OwnerContainer(repositories, owner));
+//
+//						});
+//
+//					} // end individual repos if
+//
+//					success = true;
+//				} catch (Exception e) { // Blanket catch-all, so we can retry
+//					if (e.getMessage().contains("API rate limit reached")) {
+//						System.err.println("Rate limited reached: " + e.getClass().getName());
+//					} else {
+//						e.printStackTrace();
+//					}
+//
+//					success = false;
+//					System.err.println("Failed in constructor, retrying in 60 seconds.");
+//					GHApiUtil.sleep(60 * 1000);
+//				}
+//
+//			} while (!success);
+//
+//		} catch (IOException e) {
+//			throw new UncheckedIOException(e);
+//		}
+
+//		this.supportsRateLimit = weSupportRateLimit;
+//
+//		for (int x = 0; x < 5; x++) {
+//			WorkerThread wt = new WorkerThread(queue, filter);
+//			wt.start();
+//		}
+//
+//		backgroundSchedulerThread = new BackgroundSchedulerThread(nextEventScanSettings);
+//		backgroundSchedulerThread.start();
+//
 	}
 
 	public GitHubClient getEgitClient() {
@@ -534,8 +721,10 @@ public class ServerInstance {
 		private String username;
 		private String password;
 		private String serverName;
-		private List<String> orgNames = new ArrayList<>();
-		private List<String> userRepos = new ArrayList<>();
+
+		private List<String> owners = new ArrayList<>();
+//		private List<String> orgNames = new ArrayList<>();
+//		private List<String> userRepos = new ArrayList<>();
 		private List<RepoConstructorEntry> individualRepos = new ArrayList<>();
 		private File dbDir;
 		private GhmFilter filter;
@@ -574,32 +763,53 @@ public class ServerInstance {
 			return this;
 		}
 
-		public ServerInstanceBuilder org(String str) {
-			this.orgNames = Arrays.asList(new String[] { str });
+		public ServerInstanceBuilder owner(String str) {
+			return owners(Arrays.asList(str));
+		}
+
+		public ServerInstanceBuilder owners(List<String> str) {
+
+			if (this.owners == null) {
+				this.owners = new ArrayList<>();
+			}
+
+			this.owners = new ArrayList<>(this.owners);
+			this.owners.addAll(str);
+			this.owners = Collections.unmodifiableList(str);
+
 			return this;
 		}
 
-		public ServerInstanceBuilder orgs(List<String> strList) {
-			this.orgNames = strList;
-			return this;
+		public ServerInstanceBuilder owners(String... str) {
+			return owners(str);
 		}
 
-		public ServerInstanceBuilder orgs(String... strList) {
-			this.orgNames = Arrays.asList(strList);
-			return this;
-		}
-
-		// The user equivalent to organization, eg https://github.com/jgwest
-		public ServerInstanceBuilder userRepos(String... userList) {
-			this.userRepos = Arrays.asList(userList);
-			return this;
-		}
-		
-		// The user equivalent to organization, eg https://github.com/jgwest
-		public ServerInstanceBuilder userRepos(List<String> userReposList) {
-			this.userRepos = userReposList;
-			return this;
-		}
+//		public ServerInstanceBuilder org(String str) {
+//			this.orgNames = Arrays.asList(new String[] { str });
+//			return this;
+//		}
+//
+//		public ServerInstanceBuilder orgs(List<String> strList) {
+//			this.orgNames = strList;
+//			return this;
+//		}
+//
+//		public ServerInstanceBuilder orgs(String... strList) {
+//			this.orgNames = Arrays.asList(strList);
+//			return this;
+//		}
+//
+//		// The user equivalent to organization, eg https://github.com/jgwest
+//		public ServerInstanceBuilder userRepos(String... userList) {
+//			this.userRepos = Arrays.asList(userList);
+//			return this;
+//		}
+//		
+//		// The user equivalent to organization, eg https://github.com/jgwest
+//		public ServerInstanceBuilder userRepos(List<String> userReposList) {
+//			this.userRepos = userReposList;
+//			return this;
+//		}
 
 		// 'repo' should be in the form of '(owner name)/repository name'
 		public ServerInstanceBuilder individualRepos(String repo, Long timeBetweenEventScanInSecondsParam) {
@@ -635,7 +845,7 @@ public class ServerInstance {
 		}
 
 		public ServerInstance build() {
-			return new ServerInstance(username, password, serverName, orgNames, userRepos, individualRepos,
+			return new ServerInstance(username, password, serverName, owners, individualRepos,
 					pauseBetweenRequestsInMsecs, dbDir, timeBetweenEventScansInSeconds, filter, numRequestsPerHour,
 					fileLoggingPath);
 		}
@@ -752,7 +962,6 @@ public class ServerInstance {
 			String key = repo.getOwnerName() + "/" + repo.getName();
 
 			synchronized (nextEventScanInNanos_synch) {
-
 				nextEventScanInNanos_synch.put(key, timeBetweenEventScanInNanos(repo) + System.nanoTime());
 			}
 
@@ -794,7 +1003,6 @@ public class ServerInstance {
 			String key = user.getLogin();
 
 			synchronized (nextEventScanInNanos_synch) {
-
 				nextEventScanInNanos_synch.put(key, globalTimeBetweenEventScansInNanos + System.nanoTime());
 			}
 
@@ -808,7 +1016,6 @@ public class ServerInstance {
 			String key = org.getLogin();
 
 			synchronized (nextEventScanInNanos_synch) {
-
 				nextEventScanInNanos_synch.put(key, globalTimeBetweenEventScansInNanos + System.nanoTime());
 			}
 

@@ -1,5 +1,5 @@
 /*
- * Copyright 2019 Jonathan West
+ * Copyright 2019, 2021 Jonathan West
  * 
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -56,7 +56,7 @@ public class ServiceTest extends AbstractTest {
 
 		ServerInstanceBuilder builder = getClientBuilder();
 
-		ServerInstance instance = builder.serverName("github.com").org("microclimate-dev2ops").dbDir(dirDb).filter(tf)
+		ServerInstance instance = builder.serverName("github.com").owner("microclimate-dev2ops").dbDir(dirDb).filter(tf)
 				.numRequestsPerHour(100000).build();
 
 		waitForPass(60, () -> {
@@ -96,7 +96,7 @@ public class ServiceTest extends AbstractTest {
 
 		ServerInstanceBuilder builder = getClientBuilder();
 
-		ServerInstance instance = builder.serverName("github.com").userRepos("jgwest").dbDir(dirDb).filter(tf)
+		ServerInstance instance = builder.serverName("github.com").owner("jgwest").dbDir(dirDb).filter(tf)
 				.numRequestsPerHour(100000).build();
 
 		waitForPass(60, false, () -> {

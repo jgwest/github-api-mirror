@@ -52,9 +52,7 @@ public final class ApiMirrorInstance {
 	}
 
 	public void initializeServerInstance(String configPath, String dbPath) {
-		
-		Thread.dumpStack();
-		
+
 		try {
 
 			if (configPath == null) {
@@ -81,25 +79,32 @@ public final class ApiMirrorInstance {
 
 			ObjectMapper mapper = new ObjectMapper(new YAMLFactory());
 
-			List<String> userReposList = new ArrayList<>();
-			List<String> orgList = new ArrayList<>();
+			List<String> owners = new ArrayList<>();
+
+//			List<String> userReposList = new ArrayList<>();
+//			List<String> orgList = new ArrayList<>();
 
 			ConfigFileYaml configYaml = mapper.readValue(new FileInputStream(new File(configPath)),
 					ConfigFileYaml.class);
 
-			if (configYaml.getUserRepoList() != null) {
-				userReposList.addAll(configYaml.getUserRepoList());
+			if (configYaml.getOwners() != null) {
+				owners.addAll(configYaml.getOwners().stream().filter(e -> !e.isBlank()).collect(Collectors.toList()));
 			}
 
-			if (configYaml.getOrgList() != null) {
-				orgList.addAll(configYaml.getOrgList());
+//			if (configYaml.getUserRepoList() != null) {
+//				userReposList.addAll(configYaml.getUserRepoList());
+//			}
+//
+//			if (configYaml.getOrgList() != null) {
+//				orgList.addAll(configYaml.getOrgList());
+//			}
+
+			// If the user has not overriden the configuration, then use the config YAML
+			// value
+			if (dbPath == null) {
+				dbPath = configYaml.getDbPath();
 			}
 
-			// If the user has not overriden the configuration, then use the config YAML value
-			if(dbPath == null) {
-				dbPath = configYaml.getDbPath();	
-			}
-			
 //
 //			if (dbPathProperty.isPresent() && !dbPathProperty.get().isBlank()) {
 //				dbPath = dbPathProperty.get();
@@ -121,13 +126,17 @@ public final class ApiMirrorInstance {
 					.credentials(configYaml.getGithubUsername(), configYaml.getGithubPassword()).dbDir(dbPathFile)
 					.serverName(configYaml.getGithubServer());
 
-			if (!orgList.isEmpty()) {
-				builder = builder.orgs(orgList.stream().filter(e -> !e.isEmpty()).collect(Collectors.toList()));
+			if (!owners.isEmpty()) {
+				builder = builder.owners(owners);
 			}
-			if (!userReposList.isEmpty()) {
-				builder = builder
-						.userRepos(userReposList.stream().filter(e -> !e.isEmpty()).collect(Collectors.toList()));
-			}
+
+//			if (!orgList.isEmpty()) {
+//				builder = builder.orgs(orgList.stream().filter(e -> !e.isEmpty()).collect(Collectors.toList()));
+//			}
+//			if (!userReposList.isEmpty()) {
+//				builder = builder
+//						.userRepos(userReposList.stream().filter(e -> !e.isEmpty()).collect(Collectors.toList()));
+//			}
 
 			if (configYaml.getIndividualRepoList() != null) {
 

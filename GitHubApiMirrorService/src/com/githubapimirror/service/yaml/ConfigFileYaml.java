@@ -26,9 +26,11 @@ public class ConfigFileYaml {
 	private String githubUsername;
 	private String githubPassword;
 
-	private List<String> userRepoList = new ArrayList<>();
-
-	private List<String> orgList = new ArrayList<>();
+	private List<String> owners;
+	
+//	private List<String> userRepoList = new ArrayList<>();
+//
+//	private List<String> orgList = new ArrayList<>();
 
 	private List<IndividualRepoListYaml> individualRepoList = new ArrayList<>();
 
@@ -71,13 +73,13 @@ public class ConfigFileYaml {
 		this.githubPassword = githubPassword;
 	}
 
-	public List<String> getOrgList() {
-		return orgList;
-	}
-
-	public void setOrgList(List<String> orgList) {
-		this.orgList = orgList;
-	}
+//	public List<String> getOrgList() {
+//		return orgList;
+//	}
+//
+//	public void setOrgList(List<String> orgList) {
+//		this.orgList = orgList;
+//	}
 
 	public List<IndividualRepoListYaml> getIndividualRepoList() {
 		return individualRepoList;
@@ -111,13 +113,21 @@ public class ConfigFileYaml {
 		this.githubRateLimit = githubRateLimit;
 	}
 
-	public List<String> getUserRepoList() {
-		return userRepoList;
+	public List<String> getOwners() {
+		return owners;
 	}
-
-	public void setUserRepoList(List<String> userRepoList) {
-		this.userRepoList = userRepoList;
+	
+	public void setOwners(List<String> owners) {
+		this.owners = owners;
 	}
+	
+//	public List<String> getUserRepoList() {
+//		return userRepoList;
+//	}
+//
+//	public void setUserRepoList(List<String> userRepoList) {
+//		this.userRepoList = userRepoList;
+//	}
 
 	public Long getTimeBetweenEventScansInSeconds() {
 		return timeBetweenEventScansInSeconds;
