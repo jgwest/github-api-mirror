@@ -19,11 +19,16 @@ package com.githubapimirror.tests;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.githubapimirror.GHLog;
 import com.githubapimirror.GhmFilter;
 import com.githubapimirror.shared.Owner;
 
 /** Only process GitHub resources that are contained within a test pair */
 public class TestFilter implements GhmFilter {
+
+	private static final GHLog log = GHLog.getInstance();
+
+	private static final boolean DEBUG = false;
 
 	private final List<TFTestPair> pairs = new ArrayList<>();
 
@@ -34,33 +39,51 @@ public class TestFilter implements GhmFilter {
 		pairs.add(pair);
 	}
 
+	private static void logDebug(String type, Owner owner, String text, boolean result) {
+		if (DEBUG) {
+			log.logDebug(TestFilter.class.getName() + ": [" + type + "] " + owner + (" " + text).trim() + " " + result);
+		}
+	}
+
 	@Override
 	public boolean processOwner(Owner owner) {
-		return pairs.stream().anyMatch(e -> e.owner.equals(owner));
+		boolean result = pairs.stream().anyMatch(e -> e.owner.equals(owner));
+
+		logDebug("owner", owner, "", result);
+		return result;
 	}
 
 	@Override
 	public boolean processRepo(Owner owner, String repoName) {
-		return pairs.stream().anyMatch(e -> e.owner.equals(owner) && e.repo.contentEquals(repoName));
+		boolean result = pairs.stream().anyMatch(e -> e.owner.equals(owner) && e.repo.contentEquals(repoName));
+
+		logDebug("repo", owner, repoName, result);
+		return result;
 
 	}
 
 	@Override
 	public boolean processIssue(Owner owner, String repoName, int issue) {
-		return pairs.stream().anyMatch(e -> e.owner.equals(owner) && e.repo.contentEquals(repoName)
+		boolean result = pairs.stream().anyMatch(e -> e.owner.equals(owner) && e.repo.contentEquals(repoName)
 				&& e.issueStart >= issue && e.issueEnd <= issue);
+		logDebug("issue", owner, repoName + "->" + issue, result);
+		return result;
 	}
 
 	@Override
 	public boolean processIssueEvents(Owner owner, String repoName, int issue) {
+		boolean result = false;
+
 		TFTestPair pair = pairs.stream().filter(e -> e.owner.equals(owner) && e.repo.contentEquals(repoName)
 				&& e.issueStart >= issue && e.issueEnd <= issue).findFirst().orElse(null);
 
-		if (pair == null) {
-			return false;
+		if (pair != null) {
+			result = pair.processEvents;
 		}
 
-		return pair.processEvents;
+		logDebug("issueEvents", owner, repoName + "->" + issue, result);
+
+		return result;
 
 	}
 

@@ -117,6 +117,73 @@ public class ServiceTest extends AbstractTest {
 	}
 
 	@Test
+	public void testIndividualUserRepo() throws IOException {
+
+		File dirDb = Files.createTempDirectory("gham").toFile();
+
+		String userName = "jgwest";
+		String repoName = "rogue-cloud";
+
+		TestFilter tf = new TestFilter();
+		tf.addTestPair(new TestFilter.TFTestPair(Owner.user(userName), repoName, 1, 1000, false));
+
+		ServerInstanceBuilder builder = getClientBuilder();
+
+		ServerInstance instance = builder.serverName("github.com").individualRepos("jgwest/rogue-cloud", 3600l)
+				.dbDir(dirDb).filter(tf).numRequestsPerHour(100000).build();
+
+		waitForPass(60, false, () -> {
+
+			Database db = instance.getDb();
+
+			UserRepositoriesJson urj = db.getUserRepositories(userName).get();
+
+			assertTrue(urj.getRepoNames().contains(repoName));
+
+			Owner owner = Owner.user(userName);
+
+			RepositoryJson rj = db.getRepository(owner, repoName).get();
+			assertNotNull(rj);
+
+		});
+
+	}
+
+	@Test
+	public void testIndividualOrgRepo() throws IOException {
+
+		File dirDb = Files.createTempDirectory("gham").toFile();
+
+		String orgName = "microclimate-dev2ops";
+		String repoName = "microclimate-vscode-tools";
+
+		TestFilter tf = new TestFilter();
+		tf.addTestPair(new TestFilter.TFTestPair(Owner.org(orgName), repoName, 1, 1000, false));
+
+		ServerInstanceBuilder builder = getClientBuilder();
+
+		ServerInstance instance = builder.serverName("github.com").individualRepos(orgName+"/"+repoName, 3600l)
+				.dbDir(dirDb).filter(tf).numRequestsPerHour(100000).build();
+
+		
+		waitForPass(60, false, () -> {
+
+			Database db = instance.getDb();
+
+			OrganizationJson oj = db.getOrganization(orgName).get();
+			
+			assertTrue(oj.getRepositories().contains(repoName));
+
+			Owner owner = Owner.org(orgName);
+
+			RepositoryJson rj = db.getRepository(owner, repoName).get();
+			assertNotNull(rj);
+
+		});
+
+	}
+
+	@Test
 	public void testIssueEvents() throws IOException {
 
 		File dirDb = Files.createTempDirectory("gham").toFile();
@@ -153,7 +220,7 @@ public class ServiceTest extends AbstractTest {
 
 			assertTrue(ij.getIssueEvents().stream()
 					.anyMatch(ie -> ie.getActorUserLogin().equals("chetan-rns") && ie.getType().equals("assigned")));
-			
+
 		});
 
 	}
